@@ -1,0 +1,71 @@
+{
+  "profile": {
+    "symbol": "NVDA",
+    "companyName": "NVIDIA Corporation",
+    "price": 875.20,
+    "beta": 1.70,
+    "volAvg": 45000000,
+    "mktCap": 2180000000000,
+    "lastDiv": 0.16,
+    "range": "400.00-970.00",
+    "changes": 12.50,
+    "currency": "USD",
+    "exchange": "Nasdaq Global Select",
+    "exchangeShortName": "NASDAQ",
+    "industry": "Semiconductors",
+    "website": "https://www.nvidia.com",
+    "description": "Designs graphics processing units (GPUs) for the gaming and professional markets, as well as system on a chip units for the mobile computing and automotive market.",
+    "ceo": "Jensen Huang",
+    "sector": "Technology",
+    "country": "US",
+    "fullTimeEmployees": "29600",
+    "image": "https://financialmodelingprep.com/image-placeholder/NVDA.png",
+    "ipoDate": "1999-01-22",
+    "isEtf": false,
+    "isActivelyTrading": true
+  },
+  "quote": {
+    "symbol": "NVDA",
+    "name": "NVIDIA Corporation",
+    "price": 875.20,
+    "changesPercentage": 1.45,
+    "change": 12.50,
+    "dayLow": 860.10,
+    "dayHigh": 884.80,
+    "yearHigh": 974.00,
+    "yearLow": 373.56,
+    "marketCap": 2180000000000,
+    "priceAvg50": 830.40,
+    "priceAvg200": 612.80,
+    "exchange": "NASDAQ",
+    "volume": 38000000,
+    "avgVolume": 45000000,
+    "open": 863.00,
+    "previousClose": 862.70,
+    "eps": 11.90,
+    "pe": 73.55,
+    "earningsAnnouncement": "2026-05-22T17:00:00",
+    "sharesOutstanding": 2500000000,
+    "timestamp": 1718000000
+  },
+  "financials": [
+    {
+      "date": "2026-01-25",
+      "revenue": 60922000000,
+      "netIncome": 29760000000,
+      "operatingIncome": 32972000000,
+      "eps": 11.90,
+      "ebitda": 34500000000,
+      "freeCashFlow": 27000000000
+    },
+    {
+      "date": "2025-01-26",
+      "revenue": 26974000000,
+      "netIncome": 4368000000,
+      "operatingIncome": 4224000000,
+      "eps": 1.76,
+      "ebitda": 4900000000,
+      "freeCashFlow": 3800000000
+    }
+  ]
+}

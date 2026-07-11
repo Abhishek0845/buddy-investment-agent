@@ -1,0 +1,71 @@
+{
+  "profile": {
+    "symbol": "MSFT",
+    "companyName": "Microsoft Corporation",
+    "price": 420.50,
+    "beta": 0.90,
+    "volAvg": 22000000,
+    "mktCap": 3130000000000,
+    "lastDiv": 3.00,
+    "range": "385.00-430.00",
+    "changes": 3.10,
+    "currency": "USD",
+    "exchange": "Nasdaq Global Select",
+    "exchangeShortName": "NASDAQ",
+    "industry": "Software—Infrastructure",
+    "website": "https://www.microsoft.com",
+    "description": "Develops and licenses consumer software, server solutions, personal computing, cloud solutions, and business services.",
+    "ceo": "Satya Nadella",
+    "sector": "Technology",
+    "country": "US",
+    "fullTimeEmployees": "221000",
+    "image": "https://financialmodelingprep.com/image-placeholder/MSFT.png",
+    "ipoDate": "1986-03-13",
+    "isEtf": false,
+    "isActivelyTrading": true
+  },
+  "quote": {
+    "symbol": "MSFT",
+    "name": "Microsoft Corporation",
+    "price": 420.50,
+    "changesPercentage": 0.74,
+    "change": 3.10,
+    "dayLow": 418.20,
+    "dayHigh": 422.00,
+    "yearHigh": 430.82,
+    "yearLow": 339.80,
+    "marketCap": 3130000000000,
+    "priceAvg50": 415.60,
+    "priceAvg200": 395.20,
+    "exchange": "NASDAQ",
+    "volume": 18000000,
+    "avgVolume": 22000000,
+    "open": 419.00,
+    "previousClose": 417.40,
+    "eps": 11.06,
+    "pe": 38.02,
+    "earningsAnnouncement": "2026-04-28T16:30:00",
+    "sharesOutstanding": 7430000000,
+    "timestamp": 1718000000
+  },
+  "financials": [
+    {
+      "date": "2025-06-30",
+      "revenue": 245000000000,
+      "netIncome": 88000000000,
+      "operatingIncome": 105000000000,
+      "eps": 11.06,
+      "ebitda": 118000000000,
+      "freeCashFlow": 72000000000
+    },
+    {
+      "date": "2024-06-30",
+      "revenue": 218310000000,
+      "netIncome": 72361000000,
+      "operatingIncome": 88523000000,
+      "eps": 9.68,
+      "ebitda": 102400000000,
+      "freeCashFlow": 63050000000
+    }
+  ]
+}

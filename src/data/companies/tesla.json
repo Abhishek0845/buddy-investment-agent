@@ -1,0 +1,71 @@
+{
+  "profile": {
+    "symbol": "TSLA",
+    "companyName": "Tesla Inc.",
+    "price": 175.40,
+    "beta": 2.10,
+    "volAvg": 88000000,
+    "mktCap": 560000000000,
+    "lastDiv": 0.00,
+    "range": "140.00-265.00",
+    "changes": -2.30,
+    "currency": "USD",
+    "exchange": "Nasdaq Global Select",
+    "exchangeShortName": "NASDAQ",
+    "industry": "Auto Manufacturers",
+    "website": "https://www.tesla.com",
+    "description": "Designs, develops, manufactures, leases, and sells electric vehicles, and energy generation and storage systems.",
+    "ceo": "Elon Musk",
+    "sector": "Consumer Cyclical",
+    "country": "US",
+    "fullTimeEmployees": "140000",
+    "image": "https://financialmodelingprep.com/image-placeholder/TSLA.png",
+    "ipoDate": "2010-06-29",
+    "isEtf": false,
+    "isActivelyTrading": true
+  },
+  "quote": {
+    "symbol": "TSLA",
+    "name": "Tesla Inc.",
+    "price": 175.40,
+    "changesPercentage": -1.29,
+    "change": -2.30,
+    "dayLow": 173.50,
+    "dayHigh": 178.20,
+    "yearHigh": 299.29,
+    "yearLow": 138.80,
+    "marketCap": 560000000000,
+    "priceAvg50": 182.10,
+    "priceAvg200": 215.40,
+    "exchange": "NASDAQ",
+    "volume": 79000000,
+    "avgVolume": 88000000,
+    "open": 177.50,
+    "previousClose": 177.70,
+    "eps": 4.30,
+    "pe": 40.79,
+    "earningsAnnouncement": "2026-04-23T16:30:00",
+    "sharesOutstanding": 3180000000,
+    "timestamp": 1718000000
+  },
+  "financials": [
+    {
+      "date": "2025-12-31",
+      "revenue": 96700000000,
+      "netIncome": 13500000000,
+      "operatingIncome": 8900000000,
+      "eps": 4.30,
+      "ebitda": 16400000000,
+      "freeCashFlow": 4300000000
+    },
+    {
+      "date": "2024-12-31",
+      "revenue": 96773000000,
+      "netIncome": 14997000000,
+      "operatingIncome": 8891000000,
+      "eps": 4.30,
+      "ebitda": 16300000000,
+      "freeCashFlow": 4350000000
+    }
+  ]
+}

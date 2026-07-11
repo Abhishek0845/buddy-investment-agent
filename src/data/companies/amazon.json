@@ -1,0 +1,71 @@
+{
+  "profile": {
+    "symbol": "AMZN",
+    "companyName": "Amazon.com Inc.",
+    "price": 180.10,
+    "beta": 1.15,
+    "volAvg": 38000000,
+    "mktCap": 1870000000000,
+    "lastDiv": 0.00,
+    "range": "115.00-189.00",
+    "changes": 0.85,
+    "currency": "USD",
+    "exchange": "Nasdaq Global Select",
+    "exchangeShortName": "NASDAQ",
+    "industry": "Internet Retail",
+    "website": "https://www.amazon.com",
+    "description": "Engages in the retail sale of consumer products and subscriptions in North America and internationally.",
+    "ceo": "Andy Jassy",
+    "sector": "Consumer Cyclical",
+    "country": "US",
+    "fullTimeEmployees": "1541000",
+    "image": "https://financialmodelingprep.com/image-placeholder/AMZN.png",
+    "ipoDate": "1997-05-15",
+    "isEtf": false,
+    "isActivelyTrading": true
+  },
+  "quote": {
+    "symbol": "AMZN",
+    "name": "Amazon.com Inc.",
+    "price": 180.10,
+    "changesPercentage": 0.47,
+    "change": 0.85,
+    "dayLow": 178.60,
+    "dayHigh": 181.50,
+    "yearHigh": 189.77,
+    "yearLow": 113.82,
+    "marketCap": 1870000000000,
+    "priceAvg50": 177.30,
+    "priceAvg200": 158.40,
+    "exchange": "NASDAQ",
+    "volume": 31000000,
+    "avgVolume": 38000000,
+    "open": 179.20,
+    "previousClose": 179.25,
+    "eps": 2.90,
+    "pe": 62.10,
+    "earningsAnnouncement": "2026-04-30T16:30:00",
+    "sharesOutstanding": 10400000000,
+    "timestamp": 1718000000
+  },
+  "financials": [
+    {
+      "date": "2025-12-31",
+      "revenue": 574000000000,
+      "netIncome": 30400000000,
+      "operatingIncome": 36800000000,
+      "eps": 2.90,
+      "ebitda": 85000000000,
+      "freeCashFlow": 32000000000
+    },
+    {
+      "date": "2024-12-31",
+      "revenue": 574785000000,
+      "netIncome": 30425000000,
+      "operatingIncome": 36852000000,
+      "eps": 2.90,
+      "ebitda": 85500000000,
+      "freeCashFlow": 32200000000
+    }
+  ]
+}

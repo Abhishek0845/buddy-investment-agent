@@ -1,0 +1,80 @@
+{
+  "profile": {
+    "symbol": "AAPL",
+    "companyName": "Apple Inc.",
+    "price": 182.30,
+    "beta": 1.28,
+    "volAvg": 56000000,
+    "mktCap": 2840000000000,
+    "lastDiv": 0.96,
+    "range": "165.00-198.00",
+    "changes": 1.45,
+    "currency": "USD",
+    "exchange": "Nasdaq Global Select",
+    "exchangeShortName": "NASDAQ",
+    "industry": "Consumer Electronics",
+    "website": "https://www.apple.com",
+    "description": "Designs, manufactures and markets smartphones, personal computers, tablets, wearables and accessories, and sells a variety of related services.",
+    "ceo": "Tim Cook",
+    "sector": "Technology",
+    "country": "US",
+    "fullTimeEmployees": "164000",
+    "image": "https://financialmodelingprep.com/image-placeholder/AAPL.png",
+    "ipoDate": "1980-12-12",
+    "isEtf": false,
+    "isActivelyTrading": true
+  },
+  "quote": {
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "price": 182.30,
+    "changesPercentage": 0.80,
+    "change": 1.45,
+    "dayLow": 180.50,
+    "dayHigh": 183.10,
+    "yearHigh": 199.62,
+    "yearLow": 164.08,
+    "marketCap": 2840000000000,
+    "priceAvg50": 178.40,
+    "priceAvg200": 181.20,
+    "exchange": "NASDAQ",
+    "volume": 49000000,
+    "avgVolume": 56000000,
+    "open": 180.90,
+    "previousClose": 180.85,
+    "eps": 6.13,
+    "pe": 29.74,
+    "earningsAnnouncement": "2026-05-02T16:30:00",
+    "sharesOutstanding": 15550000000,
+    "timestamp": 1718000000
+  },
+  "financials": [
+    {
+      "date": "2025-09-27",
+      "revenue": 385700000000,
+      "netIncome": 97000000000,
+      "operatingIncome": 114300000000,
+      "eps": 6.13,
+      "ebitda": 125820000000,
+      "freeCashFlow": 105780000000
+    },
+    {
+      "date": "2024-09-28",
+      "revenue": 383285000000,
+      "netIncome": 93739000000,
+      "operatingIncome": 108914000000,
+      "eps": 5.67,
+      "ebitda": 121516000000,
+      "freeCashFlow": 99285000000
+    },
+    {
+      "date": "2023-09-30",
+      "revenue": 383285000000,
+      "netIncome": 96995000000,
+      "operatingIncome": 114301000000,
+      "eps": 6.13,
+      "ebitda": 125820000000,
+      "freeCashFlow": 105780000000
+    }
+  ]
+}
