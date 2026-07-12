@@ -24,6 +24,7 @@ const resolutionCache = new Map<string, CompanyResolution>();
 
 // Lightweight local alias cache
 const ALIAS_CACHE: Record<string, CompanyResolution> = {
+  // US Large Caps
   apple: { ticker: "AAPL", companyName: "Apple Inc." },
   google: { ticker: "GOOGL", companyName: "Alphabet Inc." },
   alphabet: { ticker: "GOOGL", companyName: "Alphabet Inc." },
@@ -34,18 +35,50 @@ const ALIAS_CACHE: Record<string, CompanyResolution> = {
   amazon: { ticker: "AMZN", companyName: "Amazon.com, Inc." },
   microsoft: { ticker: "MSFT", companyName: "Microsoft Corporation" },
   netflix: { ticker: "NFLX", companyName: "Netflix, Inc." },
+  amd: { ticker: "AMD", companyName: "Advanced Micro Devices, Inc." },
+  "bank of america": { ticker: "BAC", companyName: "Bank of America Corporation" },
+  "coca-cola": { ticker: "KO", companyName: "Coca-Cola Company" },
+  // Indian Large Caps - full names
   "hdfc bank": { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
   "icici bank": { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
   "reliance industries": { ticker: "RELIANCE.NS", companyName: "Reliance Industries Limited" },
   "tata motors": { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
+  "tata consultancy": { ticker: "TCS.NS", companyName: "Tata Consultancy Services Limited" },
+  "tata consultancy services": { ticker: "TCS.NS", companyName: "Tata Consultancy Services Limited" },
   infosys: { ticker: "INFY.NS", companyName: "Infosys Limited" },
   tcs: { ticker: "TCS.NS", companyName: "Tata Consultancy Services Limited" },
   wipro: { ticker: "WIPRO.NS", companyName: "Wipro Limited" },
-  "bank of america": { ticker: "BAC", companyName: "Bank of America Corporation" },
-  "coca-cola": { ticker: "KO", companyName: "Coca-Cola Company" }
+  // Indian Large Caps - short/common names
+  hdfc: { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
+  hdfcbank: { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
+  "hdfc bank limited": { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
+  icici: { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
+  icicibank: { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
+  "icici bank limited": { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
+  reliance: { ticker: "RELIANCE.NS", companyName: "Reliance Industries Limited" },
+  "tata motors limited": { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
+  tatamotors: { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
+  "axis bank": { ticker: "AXISBANK.NS", companyName: "Axis Bank Limited" },
+  axisbank: { ticker: "AXISBANK.NS", companyName: "Axis Bank Limited" },
+  "kotak mahindra": { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank Limited" },
+  "kotak bank": { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank Limited" },
+  kotak: { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank Limited" },
+  "bajaj finance": { ticker: "BAJFINANCE.NS", companyName: "Bajaj Finance Limited" },
+  "bajaj finserv": { ticker: "BAJAJFINSV.NS", companyName: "Bajaj Finserv Limited" },
+  "maruti suzuki": { ticker: "MARUTI.NS", companyName: "Maruti Suzuki India Limited" },
+  maruti: { ticker: "MARUTI.NS", companyName: "Maruti Suzuki India Limited" },
+  "state bank": { ticker: "SBIN.NS", companyName: "State Bank of India" },
+  sbi: { ticker: "SBIN.NS", companyName: "State Bank of India" },
+  "lt": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
+  "larsen toubro": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
+  "larsen & toubro": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
+  "sun pharma": { ticker: "SUNPHARMA.NS", companyName: "Sun Pharmaceutical Industries Limited" },
+  "dr reddy": { ticker: "DRREDDY.NS", companyName: "Dr. Reddy's Laboratories Limited" },
+  "asian paints": { ticker: "ASIANPAINT.NS", companyName: "Asian Paints Limited" },
+  "ultratech cement": { ticker: "ULTRACEMCO.NS", companyName: "UltraTech Cement Limited" },
+  "hcl tech": { ticker: "HCLTECH.NS", companyName: "HCL Technologies Limited" },
+  "hcl technologies": { ticker: "HCLTECH.NS", companyName: "HCL Technologies Limited" },
 };
-
-
 
 const extractedCompaniesSchema = z.object({
   companies: z.array(z.string()).describe("A list of company names or stock ticker symbols mentioned in the text"),
@@ -217,28 +250,48 @@ const STOP_WORDS = new Set([
 
 export function extractCandidateNames(message: string): string[] {
   const candidates = new Set<string>();
-  
-  // 1. Extract uppercase words matching ticker format (alphabetic only, length 1-5, e.g., AAPL)
-  const uppercaseWords = message.match(/\b[A-Z]{1,5}(?:\.[A-Z]{2})?\b/g) || [];
-  for (const word of uppercaseWords) {
-    if (!STOP_WORDS.has(word)) {
+  const lowercaseMessage = message.toLowerCase();
+
+  // 1. Check ALIAS_CACHE for multi-word and single-word matches first
+  //    Sort by length descending so longer (more specific) aliases take priority
+  const aliasNames = Object.keys(ALIAS_CACHE).sort((a, b) => b.length - a.length);
+  const coveredRanges: Array<[number, number]> = [];
+
+  for (const alias of aliasNames) {
+    const idx = lowercaseMessage.indexOf(alias);
+    if (idx !== -1) {
+      // Check not already covered by a longer alias
+      const end = idx + alias.length;
+      const alreadyCovered = coveredRanges.some(([s, e]) => idx >= s && end <= e);
+      if (!alreadyCovered) {
+        candidates.add(alias);
+        coveredRanges.push([idx, end]);
+      }
+    }
+  }
+
+  // 2. Extract uppercase words matching ticker format, skip words covered by alias ranges
+  const uppercaseMatches = [...message.matchAll(/\b[A-Z]{1,5}(?:\.[A-Z]{2})?\b/g)];
+  for (const m of uppercaseMatches) {
+    const word = m[0];
+    const idx = m.index ?? 0;
+    if (STOP_WORDS.has(word)) continue;
+    const end = idx + word.length;
+    const coveredByAlias = coveredRanges.some(([s, e]) => idx >= s && end <= e);
+    if (!coveredByAlias) {
       candidates.add(word);
     }
   }
 
-  // 2. Check for ALIAS_CACHE lowercase matches
-  const lowercaseMessage = message.toLowerCase();
-  const aliasNames = Object.keys(ALIAS_CACHE);
-  for (const alias of aliasNames) {
-    if (lowercaseMessage.includes(alias)) {
-      candidates.add(alias);
-    }
-  }
-
-  // 3. Extract other capitalized words as company name candidates, filtering out common words
-  const capitalizedWords = message.match(/\b[A-Z][a-z]+\b/g) || [];
-  for (const word of capitalizedWords) {
-    if (!STOP_WORDS.has(word)) {
+  // 3. Extract other capitalized single words not covered by aliases
+  const capitalizedMatches = [...message.matchAll(/\b[A-Z][a-z]+\b/g)];
+  for (const m of capitalizedMatches) {
+    const word = m[0];
+    const idx = m.index ?? 0;
+    if (STOP_WORDS.has(word)) continue;
+    const end = idx + word.length;
+    const coveredByAlias = coveredRanges.some(([s, e]) => idx >= s && end <= e);
+    if (!coveredByAlias) {
       candidates.add(word);
     }
   }
