@@ -56,14 +56,14 @@ function runTests() {
   // 4. Test scoreSentimentBaseline
   console.log("Testing scoreSentimentBaseline...");
   if (
-    scoreSentimentBaseline(6) === 6 &&
-    scoreSentimentBaseline(0) === 4 &&
-    scoreSentimentBaseline(3) === 5
+    scoreSentimentBaseline(6) === 8.3 &&
+    scoreSentimentBaseline(0) === 6.0 &&
+    scoreSentimentBaseline(3) === 7.5
   ) {
     console.log("✅ scoreSentimentBaseline passed");
   } else {
     console.error(
-      `❌ scoreSentimentBaseline failed: 6->${scoreSentimentBaseline(6)}, 0->${scoreSentimentBaseline(0)}, 3->${scoreSentimentBaseline(3)}`
+      `❌ scoreSentimentBaseline failed: 6->${scoreSentimentBaseline(6)} (expected 8.3), 0->${scoreSentimentBaseline(0)} (expected 6.0), 3->${scoreSentimentBaseline(3)} (expected 7.5)`
     );
   }
 

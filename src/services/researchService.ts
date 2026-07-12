@@ -1,4 +1,4 @@
-import { fetchFmpData, FmpHistoricalPrice } from "@/lib/api/fmp";
+import { fetchFmpData, FmpHistoricalPrice, searchStocks, FmpQuotaError } from "@/lib/api/fmp";
 import { fetchFinnhubNews } from "@/lib/api/finnhub";
 import {
   calculateOverallScore,
@@ -11,18 +11,82 @@ import {
   calculateConfidence,
 } from "@/lib/scoring/engine";
 import { CompanyReport, CategoryScores } from "@/types";
+import { ProviderUnavailableError } from "@/lib/errors";
+import { logger } from "@/lib/utils/logger";
 
 export async function generateCompanyReportData(
   ticker: string
 ): Promise<Partial<CompanyReport>> {
-  // 1. Fetch Data in parallel where independent
-  const [fmpData, newsData] = await Promise.all([
-    fetchFmpData(ticker),
-    fetchFinnhubNews(ticker),
-  ]);
+  const companyNameToTickerMap: Record<string, string> = {
+    paytm: "PAYTM.NS",
+    reliance: "RELIANCE.NS",
+    hdfc: "HDFCBANK.NS",
+    infosys: "INFY.NS",
+    tcs: "TCS.NS",
+    wipro: "WIPRO.NS",
+    tatamotors: "TATAMOTORS.NS",
+    icici: "ICICIBANK.NS",
+  };
+
+  let targetTicker = ticker;
+  const clean = ticker.trim().toLowerCase();
+  if (companyNameToTickerMap[clean]) {
+    targetTicker = companyNameToTickerMap[clean];
+  }
+
+  // 1. Fetch Data in parallel
+  let fmpData: Awaited<ReturnType<typeof fetchFmpData>> = null;
+  let newsData: Awaited<ReturnType<typeof fetchFinnhubNews>> = [];
+  try {
+    const [fmp, news] = await Promise.all([
+      fetchFmpData(targetTicker),
+      fetchFinnhubNews(targetTicker).catch(() => []),
+    ]);
+    fmpData = fmp;
+    newsData = news;
+  } catch (error) {
+    if (error instanceof FmpQuotaError) {
+      throw error;
+    }
+    fmpData = null;
+    newsData = [];
+  }
+
+  // Fallback search retry if first profile lookup failed
+  if (!fmpData) {
+    logger.info(`Profile fetch failed for ${targetTicker}, retrying with search fallback...`);
+    try {
+      const searchResults = await searchStocks(ticker);
+      if (searchResults && searchResults.length > 0) {
+        // Prefer NSE stock first
+        const nseCompany = searchResults.find(
+          (r) =>
+            r.symbol.endsWith(".NS") ||
+            r.exchangeShortName?.toUpperCase() === "NSE" ||
+            r.stockExchange?.toLowerCase().includes("national stock exchange")
+        );
+        const resolvedTicker = nseCompany ? nseCompany.symbol : searchResults[0].symbol;
+        if (resolvedTicker && resolvedTicker.toUpperCase() !== targetTicker.toUpperCase()) {
+          logger.info(`Fallback resolved ticker to ${resolvedTicker}`);
+          targetTicker = resolvedTicker;
+          const [fmpRetry, newsRetry] = await Promise.all([
+            fetchFmpData(targetTicker),
+            fetchFinnhubNews(targetTicker).catch(() => []),
+          ]);
+          fmpData = fmpRetry;
+          newsData = newsRetry;
+        }
+      }
+    } catch (e) {
+      if (e instanceof FmpQuotaError) {
+        throw e;
+      }
+      logger.warn("Search retry fallback failed", { ticker, error: String(e) });
+    }
+  }
 
   if (!fmpData) {
-    throw new Error(`Failed to fetch financial data for ${ticker}`);
+    throw new ProviderUnavailableError(`Failed to fetch financial data for ${targetTicker}`);
   }
 
   // 2. Calculate Math & Scores using strongly-typed fields
@@ -79,6 +143,7 @@ export async function generateCompanyReportData(
   const report: Partial<CompanyReport> = {
     ticker: ticker,
     companyName: fmpData.profile.companyName,
+    currentPrice: fmpData.profile.price,
     overallScore: overallScore,
     tier: tier,
     confidence: confidence,
@@ -106,7 +171,7 @@ export async function generateCompanyReportData(
         reasoning: [], // To be filled by LLM
         evidence: newsData.map((n) => ({
           metric: "News",
-          value: n.headline,
+          value: `${n.headline} | Summary: ${n.summary}`,
           source: n.url,
         })),
       },
@@ -132,14 +197,24 @@ export async function generateCompanyReportData(
     },
     chartData: {
       historicalPrices: fmpData.historicalPrices
-        .slice(0, 180)
+        .slice(0, 1250)
         .reverse()
-        .map((p: FmpHistoricalPrice) => ({
-          date: p.date,
-          price: p.price,
-          ma50: ma50, // Static line for MVP chart simplicity
-          ma200: ma200, // Static line for MVP chart simplicity
-        })),
+        .map((p: FmpHistoricalPrice, idx: number, arr: FmpHistoricalPrice[]) => {
+          const start50 = Math.max(0, idx - 49);
+          const slice50 = arr.slice(start50, idx + 1);
+          const ma50Val = slice50.reduce((sum, item) => sum + item.price, 0) / slice50.length;
+
+          const start200 = Math.max(0, idx - 199);
+          const slice200 = arr.slice(start200, idx + 1);
+          const ma200Val = slice200.reduce((sum, item) => sum + item.price, 0) / slice200.length;
+
+          return {
+            date: p.date,
+            price: p.price,
+            ma50: parseFloat(ma50Val.toFixed(2)),
+            ma200: parseFloat(ma200Val.toFixed(2)),
+          };
+        }),
       rsi: [{ date: "Current", value: fmpData.technicals.rsi || 0 }],
     },
   };

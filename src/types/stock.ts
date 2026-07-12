@@ -107,10 +107,68 @@ export interface EvidenceItem {
   source: string;
 }
 
+export interface WhyScore {
+  positiveFactors: string[];
+  negativeFactors: string[];
+  improvementFactors: string[];
+}
+
+export interface NewsIntelligenceItem {
+  headline: string;
+  url: string;
+  source: string;
+  summary: string;
+  sentiment: "Positive" | "Negative" | "Neutral";
+  reason: string;
+  investmentImpact: string;
+  relativeTime: string;
+}
+
+export interface DecisionExplanation {
+  why: string;
+  riskLevel: "Low" | "Medium" | "High";
+  suits: string;
+  timeHorizon: string;
+  confidence: "Low" | "Medium" | "High";
+}
+
+export interface PortfolioSuitability {
+  longTerm: boolean;
+  sip: boolean;
+  dividend: boolean;
+  growth: boolean;
+}
+
+export interface BuddyConclusion {
+  financialHighlights: string[];
+  positiveSignals: string[];
+  riskFactors: string[];
+  keyMetricsUsed: string[];
+}
+
+export interface InvestmentMemo {
+  bullCase: string[];
+  bearCase: string[];
+  biggestRisk: string;
+  bottomLine: string;
+}
+
+export interface PositionAdvice {
+  recommendation: "Buy More" | "Hold" | "Wait" | "Reduce Position" | "Exit";
+  reason: string;
+  averageCost?: number;
+  currentPrice: number;
+  gainPercent?: number;
+  risk: "Low" | "Medium" | "High";
+  suggestedAction: string;
+  shares?: number;
+}
+
 export interface CategoryDetail {
   score: number;
   reasoning: string[];
   evidence: EvidenceItem[];
+  whyScore?: WhyScore;
 }
 
 export interface InvestmentThesis {
@@ -141,6 +199,7 @@ export interface ChartData {
 export interface CompanyReport {
   ticker: string;
   companyName: string;
+  currentPrice?: number;
   overallScore: number;
   tier: string;
   confidence: string;
@@ -153,6 +212,18 @@ export interface CompanyReport {
     risk: CategoryDetail;
   };
   chartData: ChartData;
+  whyScore?: WhyScore;
+  recommendationDecision?: "Invest" | "Hold / Wait" | "Pass";
+  decisionExplanation?: DecisionExplanation;
+  valuationStatus?: "Undervalued" | "Fair Value" | "Overvalued";
+  investmentHorizon?: string;
+  suitableFor?: string[];
+  expectedVolatility?: "Low" | "Medium" | "High";
+  portfolioSuitability?: PortfolioSuitability;
+  buddyConclusion?: BuddyConclusion;
+  newsIntelligence?: NewsIntelligenceItem[];
+  investmentMemo?: InvestmentMemo;
+  positionAdvice?: PositionAdvice;
 }
 
 export type Intent = "SINGLE" | "MULTI" | "FOLLOW_UP" | "KNOWLEDGE" | "OUT_OF_DOMAIN";
@@ -161,6 +232,7 @@ export interface DashboardData {
   type: "SINGLE" | "MULTI";
   companies: CompanyReport[];
   winner?: string;
+  comparisonSummary?: string;
 }
 
 export interface ActiveResearchContextReport {
@@ -181,6 +253,12 @@ export interface ActiveResearchContext {
   reportType: "SINGLE" | "MULTI";
   conversationMetadata: {
     lastInteraction: string;
+    chatHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   };
-  reports: Record<string, ActiveResearchContextReport>;
+  reports: Record<string, CompanyReport>;
+  portfolioPositions?: Record<string, {
+    ticker: string;
+    averagePrice?: number;
+    shares?: number;
+  }>;
 }

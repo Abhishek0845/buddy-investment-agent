@@ -1,52 +1,91 @@
-type LogLevel = "debug" | "info" | "warn" | "error";
+import { LOG_LEVEL } from "../config";
+
+export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 
 const LOG_LEVEL_VALUES: Record<LogLevel, number> = {
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3,
 };
 
-class Logger {
-  private getMinLevel(): LogLevel {
-    if (typeof window === "undefined") {
-      // Server-side
-      return (process.env.LOG_LEVEL as LogLevel) || "info";
+function shouldLog(level: LogLevel): boolean {
+  const currentLevel = (LOG_LEVEL as LogLevel) || "INFO";
+  const currentVal = LOG_LEVEL_VALUES[currentLevel] ?? 1;
+  const targetVal = LOG_LEVEL_VALUES[level];
+  return targetVal >= currentVal;
+}
+
+function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(metadata)) {
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerKey.includes("key") ||
+      lowerKey.includes("secret") ||
+      lowerKey.includes("token") ||
+      lowerKey.includes("auth") ||
+      lowerKey.includes("cookie") ||
+      lowerKey.includes("password")
+    ) {
+      sanitized[key] = "[REDACTED]";
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      sanitized[key] = sanitizeMetadata(value as Record<string, unknown>);
+    } else {
+      sanitized[key] = value;
     }
-    // Client-side default
-    return "info";
   }
 
-  private shouldLog(level: LogLevel): boolean {
-    const minLevel = this.getMinLevel();
-    return LOG_LEVEL_VALUES[level] >= LOG_LEVEL_VALUES[minLevel];
-  }
+  return sanitized;
+}
 
-  private formatMessage(level: LogLevel, message: string, context?: unknown): string {
-    const timestamp = new Date().toISOString();
-    const contextStr = context ? ` | Context: ${JSON.stringify(context)}` : "";
-    return `[${timestamp}] [${level.toUpperCase()}] ${message}${contextStr}`;
-  }
+function printLog(level: LogLevel, message: string, metadata: Record<string, unknown> = {}) {
+  if (!shouldLog(level)) return;
 
-  debug(message: string, context?: unknown) {
-    if (!this.shouldLog("debug")) return;
-    console.debug(this.formatMessage("debug", message, context));
-  }
+  const timestamp = new Date().toISOString();
+  const sanitizedMeta = sanitizeMetadata(metadata);
 
-  info(message: string, context?: unknown) {
-    if (!this.shouldLog("info")) return;
-    console.info(this.formatMessage("info", message, context));
-  }
+  if (process.env.NODE_ENV === "production") {
+    // Structured JSON output for production
+    console.log(
+      JSON.stringify({
+        timestamp,
+        level,
+        message,
+        metadata: sanitizedMeta,
+      })
+    );
+  } else {
+    // Pretty colored console output for development
+    const colorMap: Record<LogLevel, string> = {
+      DEBUG: "\x1b[36m", // Cyan
+      INFO: "\x1b[32m",  // Green
+      WARN: "\x1b[33m",  // Yellow
+      ERROR: "\x1b[31m", // Red
+    };
+    const resetColor = "\x1b[0m";
+    const color = colorMap[level] || "";
 
-  warn(message: string, context?: unknown) {
-    if (!this.shouldLog("warn")) return;
-    console.warn(this.formatMessage("warn", message, context));
-  }
-
-  error(message: string, context?: unknown) {
-    if (!this.shouldLog("error")) return;
-    console.error(this.formatMessage("error", message, context));
+    console.log(
+      `[${timestamp}] ${color}${level.padEnd(5)}${resetColor} ${message}${
+        Object.keys(sanitizedMeta).length > 0 ? " " + JSON.stringify(sanitizedMeta) : ""
+      }`
+    );
   }
 }
 
-export const logger = new Logger();
+export const logger = {
+  debug(message: string, metadata: Record<string, unknown> = {}) {
+    printLog("DEBUG", message, metadata);
+  },
+  info(message: string, metadata: Record<string, unknown> = {}) {
+    printLog("INFO", message, metadata);
+  },
+  warn(message: string, metadata: Record<string, unknown> = {}) {
+    printLog("WARN", message, metadata);
+  },
+  error(message: string, metadata: Record<string, unknown> = {}) {
+    printLog("ERROR", message, metadata);
+  },
+};

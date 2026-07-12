@@ -30,7 +30,7 @@ export function getEnv(): EnvConfig {
   };
 
   if (!isServer) {
-    // Client-side environment - secrets are undefined/empty
+    // Client-side environment - secrets are empty
     return {
       GOOGLE_API_KEY: "",
       GOOGLE_MODEL: "",
@@ -46,18 +46,20 @@ export function getEnv(): EnvConfig {
 
   if (!result.success) {
     const errorDetails = JSON.stringify(result.error.format(), null, 2);
-    console.warn(
-      "⚠️ Environment configuration validation failed:\n",
+    console.error(
+      "❌ CRITICAL ERROR: Environment configuration validation failed:\n",
       errorDetails
     );
-
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        `Critical environment variables missing:\n${errorDetails}`
-      );
-    }
+    throw new Error(
+      `Critical environment variables missing:\n${errorDetails}`
+    );
   }
 
-  parsedEnv = (result.success ? result.data : rawEnv) as EnvConfig;
+  parsedEnv = result.data;
   return parsedEnv;
+}
+
+// Auto-run validation during server initialization
+if (typeof window === "undefined") {
+  getEnv();
 }

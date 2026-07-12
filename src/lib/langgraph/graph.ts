@@ -25,7 +25,7 @@ const workflow = new StateGraph(AgentState)
   .addNode("reject", rejectNode)
   .addEdge("__start__", "intent_router")
   .addConditionalEdges("intent_router", routeIntent)
-  .addEdge("fetch", END)
+  .addEdge("fetch", "qa")
   .addEdge("qa", END)
   .addEdge("reject", END);
 

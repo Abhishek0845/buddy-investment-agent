@@ -12,6 +12,8 @@ interface ChatState {
   addMessage: (message: Omit<ChatMessage, "id" | "timestamp">) => void;
   clearActiveSession: () => void;
   setIsGenerating: (isGenerating: boolean) => void;
+  appendLastMessageContent: (content: string) => void;
+  cleanEmptyMessages: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -94,4 +96,70 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
 
   setIsGenerating: (isGenerating) => set({ isGenerating }),
+
+  appendLastMessageContent: (content) =>
+    set((state) => {
+      const activeId = state.activeSessionId;
+      if (!activeId) return {};
+
+      return {
+        sessions: state.sessions.map((session) => {
+          if (session.id === activeId) {
+            const messages = [...session.messages];
+            if (messages.length === 0) {
+              messages.push({
+                id: Math.random().toString(36).substring(7),
+                role: "assistant",
+                content,
+                timestamp: Date.now(),
+              });
+            } else {
+              const last = messages[messages.length - 1];
+              if (last.role === "assistant") {
+                messages[messages.length - 1] = {
+                  ...last,
+                  content: last.content + content,
+                  timestamp: Date.now(),
+                };
+              } else {
+                messages.push({
+                  id: Math.random().toString(36).substring(7),
+                  role: "assistant",
+                  content,
+                  timestamp: Date.now(),
+                });
+              }
+            }
+            return {
+              ...session,
+              messages,
+              updatedAt: Date.now(),
+            };
+          }
+          return session;
+        }),
+      };
+    }),
+
+  cleanEmptyMessages: () =>
+    set((state) => {
+      const activeId = state.activeSessionId;
+      if (!activeId) return {};
+
+      return {
+        sessions: state.sessions.map((session) => {
+          if (session.id === activeId) {
+            const messages = session.messages.filter(
+              (m) => !(m.role === "assistant" && m.content.trim() === "")
+            );
+            return {
+              ...session,
+              messages,
+              updatedAt: Date.now(),
+            };
+          }
+          return session;
+        }),
+      };
+    }),
 }));

@@ -7,12 +7,24 @@ import {
   HistoricalBar,
   FinancialMetric,
 } from "@/types/stock";
+import { InvalidTickerError } from "@/lib/errors";
+import { withRetry } from "@/lib/utils/retry";
+import { handleAxiosError } from "./axios";
+import { logger } from "@/lib/utils/logger";
+import { API_TIMEOUT_MS } from "@/lib/config";
+
+export class FmpQuotaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FmpQuotaError";
+  }
+}
 
 const BASE_URL = "https://financialmodelingprep.com/stable";
 
 export const fmpClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000,
+  timeout: API_TIMEOUT_MS * 2,
 });
 
 fmpClient.interceptors.request.use((config) => {
@@ -32,20 +44,74 @@ fmpClient.interceptors.response.use(
       error.response?.data?.error ||
       error.message ||
       "FMP API request failed";
-    console.error("❌ FMP API Error:", errorMsg);
+    logger.error("FMP API Error", { error: errorMsg });
     return Promise.reject(new Error(errorMsg));
   }
 );
+
+async function executeFmpRequest<T>(
+  url: string,
+  params: Record<string, unknown> = {}
+): Promise<T> {
+  return withRetry(async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+    try {
+      const response = await fmpClient.get<T>(url, {
+        params,
+        signal: controller.signal,
+      });
+
+      // Check response body for Error Message indicating quota/limit
+      if (response.data && typeof response.data === "object" && !Array.isArray(response.data)) {
+        const dataObj = response.data as Record<string, unknown>;
+        if ("Error Message" in dataObj || "error" in dataObj) {
+          const errMsg = String(dataObj["Error Message"] || dataObj["error"]);
+          if (
+            errMsg.includes("Limit Reach") ||
+            errMsg.includes("upgrade your subscription plan") ||
+            errMsg.includes("quota")
+          ) {
+            throw new FmpQuotaError(errMsg);
+          }
+        }
+      }
+
+      return response.data;
+    } catch (error) {
+      if (error instanceof FmpQuotaError) {
+        throw error;
+      }
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 429) {
+          throw new FmpQuotaError("FMP API Rate limit/quota exceeded");
+        }
+        const responseData = error.response?.data;
+        if (responseData && typeof responseData === "object" && !Array.isArray(responseData)) {
+          const errMsg = String(responseData["Error Message"] || responseData.error || "");
+          if (
+            errMsg.includes("Limit Reach") ||
+            errMsg.includes("upgrade your subscription plan") ||
+            errMsg.includes("quota")
+          ) {
+            throw new FmpQuotaError(errMsg);
+          }
+        }
+      }
+      return handleAxiosError(error, url);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
+}
 
 /**
  * Searches for stock symbols matching the query.
  * FMP stable endpoint: GET /stable/search-symbol?query={query}
  */
 export async function searchStocks(query: string): Promise<SearchResult[]> {
-  const response = await fmpClient.get<SearchResult[]>("/search-symbol", {
-    params: { query },
-  });
-  return response.data;
+  return executeFmpRequest<SearchResult[]>("/search-symbol", { query });
 }
 
 /**
@@ -53,13 +119,11 @@ export async function searchStocks(query: string): Promise<SearchResult[]> {
  * FMP stable endpoint: GET /stable/profile?symbol={symbol}
  */
 export async function getCompanyProfile(symbol: string): Promise<StockProfile> {
-  const response = await fmpClient.get<StockProfile[]>("/profile", {
-    params: { symbol },
-  });
-  if (!response.data || response.data.length === 0) {
-    throw new Error(`Company profile not found for symbol: ${symbol}`);
+  const data = await executeFmpRequest<StockProfile[]>("/profile", { symbol });
+  if (!data || data.length === 0) {
+    throw new InvalidTickerError(`Company profile not found for symbol: ${symbol}`);
   }
-  return response.data[0];
+  return data[0];
 }
 
 /**
@@ -67,13 +131,11 @@ export async function getCompanyProfile(symbol: string): Promise<StockProfile> {
  * FMP stable endpoint: GET /stable/quote?symbol={symbol}
  */
 export async function getStockQuote(symbol: string): Promise<StockQuote> {
-  const response = await fmpClient.get<StockQuote[]>("/quote", {
-    params: { symbol },
-  });
-  if (!response.data || response.data.length === 0) {
-    throw new Error(`Stock quote not found for symbol: ${symbol}`);
+  const data = await executeFmpRequest<StockQuote[]>("/quote", { symbol });
+  if (!data || data.length === 0) {
+    throw new InvalidTickerError(`Stock quote not found for symbol: ${symbol}`);
   }
-  return response.data[0];
+  return data[0];
 }
 
 /**
@@ -82,14 +144,11 @@ export async function getStockQuote(symbol: string): Promise<StockQuote> {
  */
 export async function getHistoricalPrices(
   symbol: string,
-  limit: number = 180
+  limit: number = 1250
 ): Promise<HistoricalBar[]> {
-  const response = await fmpClient.get<FmpHistoricalPrice[]>("/historical-price-eod/full", {
-    params: { symbol },
-  });
-  const historical = response.data || [];
+  const data = await executeFmpRequest<FmpHistoricalPrice[]>("/historical-price-eod/full", { symbol });
   // Return sliced and reversed (chronological order)
-  return historical
+  return data
     .slice(0, limit)
     .reverse()
     .map((item: FmpHistoricalPrice) => ({
@@ -123,21 +182,11 @@ export async function getFinancials(
   period: "annual" | "quarter" = "annual",
   limit: number = 5
 ): Promise<FinancialMetric[]> {
-  const [incomeRes, cashFlowRes, ratiosRes] = await Promise.all([
-    fmpClient.get<FMPIncomeStatement[]>("/income-statement", {
-      params: { symbol, period, limit },
-    }),
-    fmpClient.get<FMPCashFlowStatement[]>("/cash-flow-statement", {
-      params: { symbol, period, limit },
-    }),
-    fmpClient.get<FmpRatio[]>("/ratios", {
-      params: { symbol, period, limit },
-    }),
+  const [incomeStatements, cashFlowStatements, ratiosData] = await Promise.all([
+    executeFmpRequest<FMPIncomeStatement[]>("/income-statement", { symbol, period, limit }),
+    executeFmpRequest<FMPCashFlowStatement[]>("/cash-flow-statement", { symbol, period, limit }),
+    executeFmpRequest<FmpRatio[]>("/ratios", { symbol, period, limit }),
   ]);
-
-  const incomeStatements = incomeRes.data || [];
-  const cashFlowStatements = cashFlowRes.data || [];
-  const ratiosData = ratiosRes.data || [];
 
   // Map cash flow statements by date for O(1) lookups
   const cashFlowMap = new Map<string, number>();
@@ -377,56 +426,48 @@ export interface FmpRawData {
  */
 export async function fetchFmpData(ticker: string): Promise<FmpRawData | null> {
   try {
-    const [profileRes, incomeRes, balanceRes, histRes, rsiRes, ratiosRes] =
+    const [profileResData, incomeResData, balanceResData, histResData, rsiResData, ratiosResData] =
       await Promise.all([
-        fmpClient.get<FmpProfile[]>("/profile", { params: { symbol: ticker } }),
-        fmpClient.get<FmpIncomeStatement[]>("/income-statement", {
-          params: { symbol: ticker, limit: 1 },
-        }),
-        fmpClient.get<FmpBalanceSheet[]>("/balance-sheet-statement", {
-          params: { symbol: ticker, limit: 1 },
-        }),
-        fmpClient.get<FmpHistoricalPrice[]>("/historical-price-eod/full", {
-          params: { symbol: ticker },
-        }),
-        fmpClient.get<FmpTechnicalRsi[]>("/technical-indicators/rsi", {
-          params: { symbol: ticker, periodLength: 14, timeframe: "1day", limit: 1 },
-        }),
-        fmpClient.get<FmpRatio[]>("/ratios", { params: { symbol: ticker, limit: 1 } }),
+        executeFmpRequest<FmpProfile[]>("/profile", { symbol: ticker }),
+        executeFmpRequest<FmpIncomeStatement[]>("/income-statement", { symbol: ticker, limit: 1 }),
+        executeFmpRequest<FmpBalanceSheet[]>("/balance-sheet-statement", { symbol: ticker, limit: 1 }),
+        executeFmpRequest<FmpHistoricalPrice[]>("/historical-price-eod/full", { symbol: ticker }),
+        executeFmpRequest<FmpTechnicalRsi[]>("/technical-indicators/rsi", { symbol: ticker, periodLength: 14, timeframe: "1day", limit: 1 }),
+        executeFmpRequest<FmpRatio[]>("/ratios", { symbol: ticker, limit: 1 }),
       ]);
 
-    if (!profileRes.data || profileRes.data.length === 0) return null;
+    if (!profileResData || profileResData.length === 0) return null;
 
     const ratios: Partial<FmpRatio> =
-      ratiosRes.data && ratiosRes.data.length > 0 ? ratiosRes.data[0] : {};
+      ratiosResData && ratiosResData.length > 0 ? ratiosResData[0] : {};
 
     // Inject PE and Net Margin from ratios endpoint for backward compatibility
     const profile: FmpProfile = {
-      ...profileRes.data[0],
+      ...profileResData[0],
       pe: ratios.priceToEarningsRatio ?? null,
     };
 
     const incomeStatement: FmpIncomeStatement | Record<string, never> =
-      incomeRes.data && incomeRes.data.length > 0
+      incomeResData && incomeResData.length > 0
         ? {
-            ...incomeRes.data[0],
+            ...incomeResData[0],
             netIncomeRatio: ratios.netProfitMargin ?? null,
           }
         : {};
 
     const balanceSheet: FmpBalanceSheet | Record<string, never> =
-      balanceRes.data && balanceRes.data.length > 0 ? balanceRes.data[0] : {};
+      balanceResData && balanceResData.length > 0 ? balanceResData[0] : {};
 
     // Map historical prices: map 'close' to 'price'
-    const historicalPrices: FmpHistoricalPrice[] = (histRes.data || [])
-      .slice(0, 200)
+    const historicalPrices: FmpHistoricalPrice[] = (histResData || [])
+      .slice(0, 1250)
       .map((p: FmpHistoricalPrice) => ({
         ...p,
         price: p.close,
       }));
 
     const technicals: FmpTechnicalRsi | Record<string, never> =
-      rsiRes.data && rsiRes.data.length > 0 ? rsiRes.data[0] : {};
+      rsiResData && rsiResData.length > 0 ? rsiResData[0] : {};
 
     return {
       profile,
@@ -436,7 +477,13 @@ export async function fetchFmpData(ticker: string): Promise<FmpRawData | null> {
       technicals,
     };
   } catch (error) {
-    console.error(`[FMP] Error fetching data for ${ticker}:`, error);
+    if (error instanceof FmpQuotaError) {
+      throw error;
+    }
+    logger.error("Error compiling FMP data payload", {
+      ticker,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }

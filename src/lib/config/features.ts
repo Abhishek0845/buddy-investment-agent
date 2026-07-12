@@ -1,8 +1,5 @@
-export const FEATURE_FLAGS = {
-  enableChatHistory: true,
-  enableStockComparison: true,
-  enableCustomScoringWeights: true,
-  enableMockDataFallback: true, // fallback to mock local json files when api keys are missing
-  enableStructuredLogging: true,
-  enableSseStream: true, // Server-Sent Events stream for chatbot outputs
-};
+export const ENABLE_STREAMING = true;
+export const ENABLE_MULTI_COMPARE = true;
+export const ENABLE_QA = true;
+export const ENABLE_STOCK_CHART = true;
+export const ENABLE_RESEARCH_HISTORY = false;
