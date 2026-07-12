@@ -26,6 +26,7 @@ interface NodeConfig {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function extractDeterministicTickers(input: string): Promise<string[]> {
   return await resolveCompanyTickers(input);
 }
@@ -53,7 +54,13 @@ export async function intentRouterNode(
 ): Promise<Partial<typeof AgentState.State>> {
   const startTime = Date.now();
   const requestId = config?.configurable?.requestId || "N/A";
-  logger.info("intentRouterNode started", { requestId });
+
+  logger.info("[PIPELINE] Step 1: intentRouterNode started", {
+    requestId,
+    userInput: state.userInput,
+    hasActiveContext: !!state.activeResearchContext,
+    cachedTickers: Object.keys(state.activeResearchContext?.reports || {}),
+  });
 
   const sendEvent = config?.configurable?.sendEvent;
   const userInput = state.userInput;
@@ -126,6 +133,14 @@ export async function intentRouterNode(
   const bulkResult = await resolveCompanyTickersBulk(userInput);
   let resolved = bulkResult.tickers;
 
+  logger.info("[PIPELINE] Step 2: Company resolution completed", {
+    requestId,
+    userInput,
+    bulkStatus: bulkResult.status,
+    resolvedTickers: resolved,
+    unresolved: bulkResult.unresolved,
+  });
+
   // Early error handling for bulk resolution
   if (bulkResult.status === "rate_limit") {
     result = {
@@ -140,32 +155,44 @@ export async function intentRouterNode(
       error: "A network error occurred while resolving the company. Please check your connection."
     };
   }
-if (resolved.length === 0) {
-  const directRes = await resolveCompany(userInput);
-  if (directRes.success) {
-    resolved = [directRes.resolution.ticker];
-    logger.info("Fallback direct company resolution succeeded", { ticker: directRes.resolution.ticker, requestId });
+
+  // If no tickers resolved deterministically, attempt a direct company name resolution as fallback
+  if (resolved.length === 0) {
+    const directRes = await resolveCompany(userInput);
+    if (directRes.success) {
+      resolved = [directRes.resolution.ticker];
+      logger.info("[PIPELINE] Fallback direct company resolution succeeded", {
+        requestId,
+        ticker: directRes.resolution.ticker,
+        companyName: directRes.resolution.companyName,
+      });
+    } else {
+      logger.info("[PIPELINE] Direct company resolution also failed", {
+        requestId,
+        reason: directRes.reason,
+      });
+    }
   }
-}
 
   // Active workspace check (debug logging)
   const tabState = useTabStore.getState();
   const activeTabId = tabState.activeTabId;
-  logger.info("Routing check - activeTabId", { activeTabId, requestId });
+  logger.info("[PIPELINE] Step 3: Active workspace check", {
+    requestId,
+    activeTabId,
+    resolvedTickers: resolved,
+  });
 
   // Cached report check: if any resolved ticker already has a report, treat as FOLLOW_UP
   if (!result?.intent && resolved.length > 0 && activeResearchContext?.reports) {
     const cachedTicker = resolved.find((t) => activeResearchContext.reports?.[t]);
     if (cachedTicker) {
-      logger.info("Cached report found for ticker, routing as FOLLOW_UP", { cachedTicker, requestId });
+      logger.info("[PIPELINE] Cached report found — routing as FOLLOW_UP", { requestId, cachedTicker });
       result = { intent: "FOLLOW_UP", tickers: [], error: null };
     }
   }
 
-
-
   const hasQuestionKeywords = /\b(why|how|what|explain|describe|question|which|who|where|when|difference|score|thesis|strength|weakness|risk|should|would|could|is|are|does|do|can)\b/i.test(userInput);
-
   const allResolvedLoaded = resolved.length > 0 && resolved.every(t => activeResearchContext?.reports?.[t]);
 
   // Determine target ticker for follow‑up checks
@@ -194,8 +221,9 @@ if (resolved.length === 0) {
       sendEvent("progress", { message: "Analyzing query context..." });
     }
     result = { intent: "FOLLOW_UP", tickers: [], error: null };
-  } else {
+  } else if (!result?.intent) {
     // 2. Fall back to Gemini slow-path classification
+    logger.info("[PIPELINE] No deterministic resolution — falling back to Gemini intent classifier", { requestId });
     try {
       const structuredLlm = llm.withStructuredOutput(intentSchema);
       const currentDate = new Date().toISOString().split("T")[0];
@@ -211,6 +239,12 @@ if (resolved.length === 0) {
           { role: "user", content: wrappedInput },
         ])
       ) as IntentResponse & { error?: string };
+
+      logger.info("[PIPELINE] Gemini intent classifier response", {
+        requestId,
+        geminiIntent: response.intent,
+        geminiTickers: response.tickers,
+      });
 
       const geminiResolved: string[] = [];
       const unresolvedNames: string[] = [];
@@ -281,13 +315,20 @@ if (resolved.length === 0) {
         };
       }
     } catch (e) {
-      logger.error("Gemini classification failed, falling back to OUT_OF_DOMAIN", {
+      logger.error("[PIPELINE] Gemini classification failed — falling back to OUT_OF_DOMAIN", {
         requestId,
         error: e instanceof Error ? e.message : String(e),
       });
       result = { intent: "OUT_OF_DOMAIN", tickers: [], error: null };
     }
   }
+
+  logger.info("[PIPELINE] Step 4: Intent routing decided", {
+    requestId,
+    intent: result?.intent,
+    tickers: result?.tickers,
+    hasError: !!result?.error,
+  });
 
   // Stream intent event immediately
   if (result?.intent) {
@@ -297,12 +338,11 @@ if (resolved.length === 0) {
   }
 
   const duration = Date.now() - startTime;
-  logger.info("intentRouterNode finished", {
+  logger.info("[PIPELINE] intentRouterNode finished", {
     requestId,
     durationMs: duration,
-    intent: result.intent,
-    tickersResolved: result.tickers,
-    success: true,
+    intent: result?.intent,
+    tickersResolved: result?.tickers,
   });
 
   return { ...result, activeResearchContext: activeResearchContext || state.activeResearchContext };
@@ -314,13 +354,17 @@ export async function mapReduceFetchNode(
 ): Promise<Partial<typeof AgentState.State>> {
   const startTime = Date.now();
   const requestId = config?.configurable?.requestId || "N/A";
-  logger.info("mapReduceFetchNode started", { requestId, tickers: state.tickers });
+  logger.info("[PIPELINE] Step 5: mapReduceFetchNode started", {
+    requestId,
+    intent: state.intent,
+    tickers: state.tickers,
+  });
 
   const sendEvent = config?.configurable?.sendEvent;
   const tickers = state.tickers;
 
   if (tickers.length === 0) {
-    logger.warn("mapReduceFetchNode aborted - empty tickers list", { requestId });
+    logger.error("[PIPELINE] mapReduceFetchNode aborted — empty tickers list", { requestId });
     return { error: "No companies resolved to analyze." };
   }
 
@@ -345,6 +389,12 @@ export async function mapReduceFetchNode(
     }
   }
 
+  logger.info("[PIPELINE] Step 5a: Cache check complete", {
+    requestId,
+    cachedTickers: Array.from(existingMap.keys()),
+    tickersToFetch: tickers.filter(t => !existingMap.has(t.toUpperCase())),
+  });
+
   let reports;
   try {
     reports = await Promise.all(
@@ -352,7 +402,7 @@ export async function mapReduceFetchNode(
         limit(async () => {
           const uppercaseTicker = t.toUpperCase();
           if (existingMap.has(uppercaseTicker)) {
-            logger.info(`Reusing existing company report for ${uppercaseTicker}`, { requestId });
+            logger.info(`[PIPELINE] Reusing cached report for ${uppercaseTicker}`, { requestId });
             return existingMap.get(uppercaseTicker)!;
           }
 
@@ -360,13 +410,20 @@ export async function mapReduceFetchNode(
             if (sendEvent) {
               sendEvent("progress", { message: `Fetching profile for ${t}...` });
             }
+            logger.info(`[PIPELINE] Step 5b: Calling FMP for ${uppercaseTicker}`, { requestId });
             const report = await generateCompanyReportData(t);
+            logger.info(`[PIPELINE] Step 5b: FMP completed for ${uppercaseTicker}`, {
+              requestId,
+              ticker: report.ticker,
+              hasProfile: !!report.companyName,
+              currentPrice: report.currentPrice,
+            });
             return report;
           } catch (err) {
             if (err instanceof FmpQuotaError) {
               throw err;
             }
-            logger.error(`FMP fetch failure for ticker ${t}`, {
+            logger.error(`[PIPELINE] FMP fetch failure for ${uppercaseTicker}`, {
               requestId,
               error: err instanceof Error ? err.message : String(err),
             });
@@ -377,7 +434,7 @@ export async function mapReduceFetchNode(
     );
   } catch (error) {
     if (error instanceof FmpQuotaError) {
-      logger.error("FMP Quota Limit reached, aborting execution", { requestId });
+      logger.error("[PIPELINE] FMP Quota Limit reached — aborting", { requestId });
       throw new Error(`QUOTA_LIMIT::${error.message}`);
     }
     throw error;
@@ -386,9 +443,14 @@ export async function mapReduceFetchNode(
   const validReports = reports.filter((r) => r && r.ticker) as CompanyReport[];
 
   if (validReports.length === 0) {
-    logger.error("mapReduceFetchNode failed - all ticker profile fetches failed", { requestId });
+    logger.error("[PIPELINE] All FMP fetches failed — no valid reports", { requestId, tickers });
     return { error: "Failed to fetch data for all requested companies." };
   }
+
+  logger.info("[PIPELINE] Step 5c: FMP fetch complete — starting synthesis", {
+    requestId,
+    validTickers: validReports.map(r => r.ticker),
+  });
 
   // 2. Granular analysis stages for progress reporting
   if (sendEvent) {
@@ -398,7 +460,7 @@ export async function mapReduceFetchNode(
   // 3. Synthesis with Gemini (Zod validation retry / fallback)
   const synthesisPromises = validReports.map(async (report) => {
     if (report.recommendationDecision && report.whyScore) {
-      logger.info(`Skipping synthesis for already synthesized company: ${report.ticker}`, { requestId });
+      logger.info(`[PIPELINE] Skipping synthesis — already synthesized: ${report.ticker}`, { requestId });
       return report;
     }
 
@@ -423,14 +485,16 @@ export async function mapReduceFetchNode(
     
     let llmResponse: ThesisResponse;
     try {
+      logger.info(`[PIPELINE] Step 5d: Starting Gemini synthesis for ${report.ticker}`, { requestId });
       llmResponse = await invokeLlmWithRetry(() =>
         structuredLlm.invoke([
           { role: "system", content: SYNTHESIS_PROMPT },
           { role: "user", content: JSON.stringify(report) + positionDetailsContext },
         ])
       ) as ThesisResponse;
+      logger.info(`[PIPELINE] Step 5d: Gemini synthesis complete for ${report.ticker}`, { requestId });
     } catch (e) {
-      logger.warn(`Zod/LLM validation failed on output for ${report.ticker}, using fallback.`, {
+      logger.warn(`[PIPELINE] Synthesis failed for ${report.ticker} — using deterministic fallback`, {
         requestId,
         error: e instanceof Error ? e.message : String(e),
       });
@@ -583,9 +647,9 @@ export async function mapReduceFetchNode(
       );
 
       dashboardData.comparisonSummary = compResponse.content as string;
-      logger.info("Generated comparative summary via LLM", { requestId });
+      logger.info("[PIPELINE] Generated comparative summary via LLM", { requestId });
     } catch (e) {
-      logger.warn("Comparison summary LLM run failed, using fallback", { error: String(e) });
+      logger.warn("[PIPELINE] Comparison summary LLM run failed — using fallback", { error: String(e) });
       const ticker1 = finalReports[0].ticker;
       const ticker2 = finalReports[1].ticker;
       dashboardData.comparisonSummary = `### 🏆 Overall Winner\n**Winner:** **${dashboardData.winner}**\nThis asset shows superior overall rating indicators.\n\n### 🎯 Who Should Choose What?\n* **Choose ${ticker1} if:** You seek long-term stability and conservative margins.\n* **Choose ${ticker2} if:** You seek active volatility and technical momentum patterns.`;
@@ -628,17 +692,22 @@ export async function mapReduceFetchNode(
     reports: mergedReports,
   };
 
+  logger.info("[PIPELINE] Step 5e: Dashboard generated — sending SSE events", {
+    requestId,
+    dashboardType: dashboardData.type,
+    companies: finalReports.map(r => ({ ticker: r.ticker, score: r.overallScore })),
+  });
+
   if (sendEvent) {
     sendEvent("dashboard", dashboardData);
     sendEvent("context", activeResearchContext);
   }
 
   const duration = Date.now() - startTime;
-  logger.info("mapReduceFetchNode finished successfully", {
+  logger.info("[PIPELINE] mapReduceFetchNode finished successfully", {
     requestId,
     durationMs: duration,
     companiesGenerated: finalReports.map((r) => r.ticker),
-    success: true,
   });
 
   return { dashboardData, activeResearchContext };
@@ -714,21 +783,31 @@ export async function qaNode(
 ): Promise<Partial<typeof AgentState.State>> {
   const startTime = Date.now();
   const requestId = config?.configurable?.requestId || "N/A";
-  logger.info("qaNode started", { requestId });
+  logger.info("[PIPELINE] Step 6: qaNode started", {
+    requestId,
+    intent: state.intent,
+    userInput: state.userInput,
+    hasDashboard: !!state.dashboardData,
+    dashboardCompanies: state.dashboardData?.companies?.map(c => c.ticker) || [],
+    hasActiveContext: !!state.activeResearchContext,
+  });
 
   const sendEvent = config?.configurable?.sendEvent;
   
+  // Short-circuit: Research intent completed, just send a summary chat message
   if ((state.intent === "SINGLE" || state.intent === "MULTI") && !isQuestionQuery(state.userInput)) {
     const dashboardData = state.dashboardData;
     let finalChatText = "";
+
     if (dashboardData && dashboardData.companies && dashboardData.companies.length > 0) {
       if (dashboardData.companies.length === 1) {
         const company = dashboardData.companies[0];
-        finalChatText = `### 📈 Analysis Complete for **${company.companyName} (${company.ticker})**\n\n` +
-          `- **Overall Score:** **${company.overallScore.toFixed(1)}/100** (Tier: **${company.tier}**)\n` +
+        const score = typeof company.overallScore === "number" ? company.overallScore.toFixed(1) : "N/A";
+        finalChatText = `### 📈 Analysis Complete for **${company.companyName || company.ticker} (${company.ticker})**\n\n` +
+          `- **Overall Score:** **${score}/100** (Tier: **${company.tier || "N/A"}**)\n` +
           `- **Recommendation Decision:** **${company.recommendationDecision || "Hold / Wait"}**\n` +
           `- **Valuation Status:** **${company.valuationStatus || "N/A"}**\n` +
-          `- **Bottom Line:** ${company.investmentMemo?.bottomLine || company.confidenceRationale || ""}\n\n` +
+          `- **Bottom Line:** ${company.investmentMemo?.bottomLine || company.confidenceRationale || "See dashboard for details."}\n\n` +
           `I have generated the complete report for you. Please check the dashboard tabs for detailed sections.`;
       } else {
         finalChatText = `### 📊 Comparison Analysis Complete\n\n` +
@@ -740,19 +819,27 @@ export async function qaNode(
       finalChatText = "I've updated the analysis dashboard with the latest company data.";
     }
 
+    logger.info("[PIPELINE] Step 6: qaNode sending research summary chat message", {
+      requestId,
+      chatTextLength: finalChatText.length,
+      companies: dashboardData?.companies?.map(c => c.ticker) || [],
+    });
+
     if (sendEvent) {
       sendEvent("chat", { token: finalChatText });
       sendEvent("context", state.activeResearchContext);
     }
+
     const duration = Date.now() - startTime;
-    logger.info("qaNode finished (short-circuited research intent)", {
+    logger.info("[PIPELINE] Step 6: qaNode finished (research summary branch)", {
       requestId,
       durationMs: duration,
-      success: true,
+      chatSent: true,
     });
     return { error: `CHAT_RESPONSE::${finalChatText}`, activeResearchContext: state.activeResearchContext };
   }
 
+  // QA path: use Gemini to answer based on context
   const context = buildOptimizedContext(state.activeResearchContext, state.dashboardData);
   const prompt = QA_PROMPT.replace("{activeResearchContext}", context);
 
@@ -770,17 +857,28 @@ export async function qaNode(
       { role: "user", content: wrappedInput }
     ];
 
+    logger.info("[PIPELINE] Step 6: qaNode calling Gemini for answer", {
+      requestId,
+      historyLength: chatHistory.length,
+      contextLength: context.length,
+    });
+
     const response = await invokeLlmWithRetry(() =>
       llm.invoke(messages)
     );
 
     finalChatText = response.content as string;
 
+    logger.info("[PIPELINE] Step 6: qaNode Gemini answer received", {
+      requestId,
+      responseLength: finalChatText.length,
+    });
+
     if (sendEvent) {
       sendEvent("chat", { token: finalChatText });
     }
   } catch (err) {
-    logger.error("qaNode LLM call failed, using deterministic fallback response", {
+    logger.error("[PIPELINE] qaNode LLM call failed — using deterministic fallback", {
       requestId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -809,10 +907,11 @@ export async function qaNode(
   }
 
   const duration = Date.now() - startTime;
-  logger.info("qaNode finished", {
+  logger.info("[PIPELINE] Step 6: qaNode finished", {
     requestId,
     durationMs: duration,
-    success: true,
+    chatSent: !!finalChatText,
+    chatTextLength: finalChatText.length,
   });
 
   return { error: `CHAT_RESPONSE::${finalChatText}`, activeResearchContext: state.activeResearchContext };
@@ -824,7 +923,12 @@ export async function rejectNode(
 ): Promise<Partial<typeof AgentState.State>> {
   const startTime = Date.now();
   const requestId = config?.configurable?.requestId || "N/A";
-  logger.info("rejectNode started", { requestId });
+  logger.info("[PIPELINE] Step 6 (reject): rejectNode started", {
+    requestId,
+    stateIntent: state.intent,
+    stateError: state.error,
+    tickers: state.tickers,
+  });
 
   const sendEvent = config?.configurable?.sendEvent;
   
@@ -843,6 +947,12 @@ export async function rejectNode(
     }
   }
 
+  logger.info("[PIPELINE] rejectNode sending response", {
+    requestId,
+    isChatResponse,
+    errorMessageLength: errorMessage.length,
+  });
+
   if (sendEvent) {
     if (isChatResponse) {
       sendEvent("chat", { token: errorMessage });
@@ -852,11 +962,9 @@ export async function rejectNode(
   }
 
   const duration = Date.now() - startTime;
-  logger.info("rejectNode finished", {
+  logger.info("[PIPELINE] rejectNode finished", {
     requestId,
     durationMs: duration,
-    errorResponse: errorMessage,
-    success: true,
   });
 
   return { error: state.error };

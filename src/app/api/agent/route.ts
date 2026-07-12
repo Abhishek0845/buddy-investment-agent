@@ -98,10 +98,15 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        logger.info("[PIPELINE] Step 7: LangGraph execution complete — sending done event", {
+          requestId,
+          detectedIntent,
+          companyCount,
+        });
         sendEvent("done", {});
 
         const duration = Date.now() - startTime;
-        logger.info("API request completed successfully", {
+        logger.info("[PIPELINE] Step 8: API response complete", {
           requestId,
           ip,
           detectedIntent,
@@ -109,6 +114,7 @@ export async function POST(req: NextRequest) {
           durationMs: duration,
           status: 200,
         });
+
       } catch (err: unknown) {
         const duration = Date.now() - startTime;
         const errMsg = err instanceof Error ? err.message : String(err);
