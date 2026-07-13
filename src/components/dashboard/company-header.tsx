@@ -25,7 +25,7 @@ export function CompanyHeader({ report }: CompanyHeaderProps) {
         <div className="text-left sm:text-right">
           <span className="text-[10px] text-muted-foreground block uppercase font-bold tracking-wider">Latest Price</span>
           <span className="text-2xl font-extrabold tracking-tight text-emerald-555 dark:text-emerald-450 mt-0.5 block">
-            ${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {report.currency === "INR" ? "₹" : "$"}{currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
       )}

@@ -1,3 +1,5 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 import { NextRequest, NextResponse } from "next/server";
 import { app } from "@/lib/langgraph/graph";
 import { getEnv } from "@/lib/validation/env";

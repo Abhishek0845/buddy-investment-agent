@@ -22,11 +22,12 @@ interface StockChartProps {
     ma200?: number;
   }>;
   ticker?: string;
+  currency?: string;
 }
 
 type Timeframe = "1M" | "6M" | "1Y" | "5Y";
 
-export function StockChart({ prices, ticker = "" }: StockChartProps) {
+export function StockChart({ prices, ticker = "", currency = "USD" }: StockChartProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>("6M");
   const [highlight, setHighlight] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
@@ -122,7 +123,7 @@ export function StockChart({ prices, ticker = "" }: StockChartProps) {
             tickLine={false}
             axisLine={false}
             domain={["auto", "auto"]}
-            tickFormatter={(v) => `$${v}`}
+            tickFormatter={(v) => `${currency === "INR" ? "₹" : "$"}${v}`}
           />
           <Tooltip
             contentStyle={{

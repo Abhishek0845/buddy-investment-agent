@@ -376,18 +376,19 @@ export async function mapReduceFetchNode(
   const limit = pLimit(CONCURRENCY_LIMIT);
   const hasRefresh = /\b(refresh|reload|re-run|update|again)\b/i.test(state.userInput || "");
   const existingMap = new Map<string, CompanyReport>();
-  if (!hasRefresh) {
-    if (state.activeResearchContext?.reports) {
-      for (const [ticker, report] of Object.entries(state.activeResearchContext.reports)) {
-        existingMap.set(ticker.toUpperCase(), report);
-      }
-    }
-    if (state.dashboardData?.companies) {
-      for (const company of state.dashboardData.companies) {
-        existingMap.set(company.ticker.toUpperCase(), company);
-      }
+  // Disabled caching to force fresh data fetch
+  /*
+  if (state.activeResearchContext?.reports) {
+    for (const [ticker, report] of Object.entries(state.activeResearchContext.reports)) {
+      existingMap.set(ticker.toUpperCase(), report);
     }
   }
+  if (state.dashboardData?.companies) {
+    for (const company of state.dashboardData.companies) {
+      existingMap.set(company.ticker.toUpperCase(), company);
+    }
+  }
+  */
 
   logger.info("[PIPELINE] Step 5a: Cache check complete", {
     requestId,
@@ -444,7 +445,11 @@ export async function mapReduceFetchNode(
 
   if (validReports.length === 0) {
     logger.error("[PIPELINE] All FMP fetches failed — no valid reports", { requestId, tickers });
-    return { error: "Failed to fetch data for all requested companies." };
+    
+    const tickerList = tickers.join(", ");
+    return { 
+      error: `CHAT_RESPONSE::⚠️ **Data Not Available for "${tickerList}"**\n\nThe current market data provider (**Financial Modeling Prep free plan**) only supports **major US stocks** listed on NYSE and NASDAQ.\n\n**This means the following will NOT work on the free plan:**\n- 🇮🇳 Indian stocks (NSE/BSE) — HDFC Bank, ICICI, Reliance, etc.\n- 🇮🇳 Indian ADRs — HDB, IBN, WIT, INFY, TTM, RDY, etc.\n- Most international/foreign-exchange stocks\n\n**What DOES work ✅:**\n- **US Tech:** Apple (AAPL), Nvidia (NVDA), Microsoft (MSFT), Google (GOOGL), Meta (META)\n- **US Finance:** JPMorgan (JPM), Goldman Sachs (GS), Visa (V)\n- **US Other:** Tesla (TSLA), Amazon (AMZN), Netflix (NFLX), Disney (DIS)\n\nTry asking: *"Should I buy Apple?"* or *"Compare Tesla vs Nvidia"*\n\nTo enable Indian stock support, the FMP API key needs to be upgraded to a paid plan at [financialmodelingprep.com](https://financialmodelingprep.com) 🔑` 
+    };
   }
 
   logger.info("[PIPELINE] Step 5c: FMP fetch complete — starting synthesis", {
@@ -804,7 +809,7 @@ export async function qaNode(
         const company = dashboardData.companies[0];
         const score = typeof company.overallScore === "number" ? company.overallScore.toFixed(1) : "N/A";
         finalChatText = `### 📈 Analysis Complete for **${company.companyName || company.ticker} (${company.ticker})**\n\n` +
-          `- **Overall Score:** **${score}/100** (Tier: **${company.tier || "N/A"}**)\n` +
+          `- **Overall Score:** **${score}/10** (Tier: **${company.tier || "N/A"}**)\n` +
           `- **Recommendation Decision:** **${company.recommendationDecision || "Hold / Wait"}**\n` +
           `- **Valuation Status:** **${company.valuationStatus || "N/A"}**\n` +
           `- **Bottom Line:** ${company.investmentMemo?.bottomLine || company.confidenceRationale || "See dashboard for details."}\n\n` +
@@ -816,7 +821,9 @@ export async function qaNode(
           `You can find the detailed comparison table and individual breakdowns in the **Comparison** tab.`;
       }
     } else {
-      finalChatText = "I've updated the analysis dashboard with the latest company data.";
+      // Dashboard data is missing — the fetch likely failed silently
+      const tickerList = state.tickers?.join(", ") || "the requested company";
+      finalChatText = `⚠️ **Analysis Incomplete**\n\nI was unable to generate a complete report for **${tickerList}**. The financial data fetch may have failed or returned no results.\n\nThis can happen when:\n- The company is listed on an unsupported exchange (e.g. NSE/BSE for Indian stocks)\n- The market data provider returned no profile\n- API rate limits were hit\n\nPlease try a US-listed stock (e.g. AAPL, TSLA, NVDA, MSFT) or an Indian ADR listed on NYSE/NASDAQ like **INFY**, **WIT**, or **HDB**.`;
     }
 
     logger.info("[PIPELINE] Step 6: qaNode sending research summary chat message", {
@@ -885,11 +892,11 @@ export async function qaNode(
     let fallbackText = "⚠️ Generative AI API is currently rate-limited. However, based on the loaded research reports:\n\n";
     if (state.activeResearchContext?.reports) {
       for (const [ticker, report] of Object.entries(state.activeResearchContext.reports)) {
-        fallbackText += `* **${ticker}**: Overall Score of **${report.overallScore}/100** (Tier: ${report.tier}).\n`;
-        fallbackText += `  - Fundamentals: ${report.categories.fundamentals.score}/100\n`;
-        fallbackText += `  - Technicals: ${report.categories.technicals.score}/100\n`;
-        fallbackText += `  - Sentiment: ${report.categories.sentiment.score}/100\n`;
-        fallbackText += `  - Risk: ${report.categories.risk.score}/100\n\n`;
+        fallbackText += `* **${ticker}**: Overall Score of **${report.overallScore}/10** (Tier: ${report.tier}).\n`;
+        fallbackText += `  - Fundamentals: ${report.categories.fundamentals.score}/10\n`;
+        fallbackText += `  - Technicals: ${report.categories.technicals.score}/10\n`;
+        fallbackText += `  - Sentiment: ${report.categories.sentiment.score}/10\n`;
+        fallbackText += `  - Risk: ${report.categories.risk.score}/10\n\n`;
       }
     } else {
       fallbackText += "No active research reports are currently loaded in context.";

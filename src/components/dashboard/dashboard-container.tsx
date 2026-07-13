@@ -138,7 +138,7 @@ export function DashboardContainer() {
 
         {/* 4. Stock Chart Visualization */}
         {report.chartData?.historicalPrices && (
-          <StockChart prices={report.chartData.historicalPrices} ticker={report.ticker} />
+          <StockChart prices={report.chartData.historicalPrices} ticker={report.ticker} currency={report.currency} />
         )}
 
         {/* 5. 3-Column Core Analysis Grid: Fundamentals, Risk, Technicals */}

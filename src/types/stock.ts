@@ -199,6 +199,7 @@ export interface ChartData {
 export interface CompanyReport {
   ticker: string;
   companyName: string;
+  currency?: string;
   currentPrice?: number;
   overallScore: number;
   tier: string;

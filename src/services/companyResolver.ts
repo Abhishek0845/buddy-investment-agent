@@ -74,46 +74,64 @@ const ALIAS_CACHE: Record<string, CompanyResolution> = {
   disney: { ticker: "DIS", companyName: "The Walt Disney Company" },
   "berkshire hathaway": { ticker: "BRK-B", companyName: "Berkshire Hathaway Inc." },
 
-  // Indian Large Caps - full names
+  // Indian Large Caps — NSE tickers (Yahoo Finance supports these fully)
   "hdfc bank": { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
-  "icici bank": { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
-  "reliance industries": { ticker: "RELIANCE.NS", companyName: "Reliance Industries Limited" },
-  "tata motors": { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
-  "tata consultancy": { ticker: "TCS.NS", companyName: "Tata Consultancy Services Limited" },
-  "tata consultancy services": { ticker: "TCS.NS", companyName: "Tata Consultancy Services Limited" },
-  infosys: { ticker: "INFY.NS", companyName: "Infosys Limited" },
-  tcs: { ticker: "TCS.NS", companyName: "Tata Consultancy Services Limited" },
-  wipro: { ticker: "WIPRO.NS", companyName: "Wipro Limited" },
-  // Indian Large Caps - short/common names
+  "hdfc bank limited": { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
   hdfc: { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
   hdfcbank: { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
-  "hdfc bank limited": { ticker: "HDFCBANK.NS", companyName: "HDFC Bank Limited" },
+
+  "icici bank": { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
+  "icici bank limited": { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
   icici: { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
   icicibank: { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
-  "icici bank limited": { ticker: "ICICIBANK.NS", companyName: "ICICI Bank Limited" },
-  reliance: { ticker: "RELIANCE.NS", companyName: "Reliance Industries Limited" },
-  "tata motors limited": { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
+
+  infosys: { ticker: "INFY", companyName: "Infosys Limited (NYSE)" },
+  infy: { ticker: "INFY", companyName: "Infosys Limited (NYSE)" },
+
+  wipro: { ticker: "WIPRO.NS", companyName: "Wipro Limited" },
+
+  "dr reddy": { ticker: "DRREDDY.NS", companyName: "Dr. Reddy's Laboratories" },
+  "dr reddys": { ticker: "DRREDDY.NS", companyName: "Dr. Reddy's Laboratories" },
+
+  "tata motors": { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
   tatamotors: { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
+  "tata motors limited": { ticker: "TATAMOTORS.NS", companyName: "Tata Motors Limited" },
+
+  "tata consultancy": { ticker: "TCS.NS", companyName: "Tata Consultancy Services" },
+  "tata consultancy services": { ticker: "TCS.NS", companyName: "Tata Consultancy Services" },
+  tcs: { ticker: "TCS.NS", companyName: "Tata Consultancy Services" },
+
+  reliance: { ticker: "RELIANCE.NS", companyName: "Reliance Industries Limited" },
+  "reliance industries": { ticker: "RELIANCE.NS", companyName: "Reliance Industries Limited" },
+
   "axis bank": { ticker: "AXISBANK.NS", companyName: "Axis Bank Limited" },
   axisbank: { ticker: "AXISBANK.NS", companyName: "Axis Bank Limited" },
-  "kotak mahindra": { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank Limited" },
-  "kotak bank": { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank Limited" },
-  kotak: { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank Limited" },
+
+  "kotak mahindra": { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank" },
+  "kotak bank": { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank" },
+  kotak: { ticker: "KOTAKBANK.NS", companyName: "Kotak Mahindra Bank" },
+
   "bajaj finance": { ticker: "BAJFINANCE.NS", companyName: "Bajaj Finance Limited" },
   "bajaj finserv": { ticker: "BAJAJFINSV.NS", companyName: "Bajaj Finserv Limited" },
+
   "maruti suzuki": { ticker: "MARUTI.NS", companyName: "Maruti Suzuki India Limited" },
   maruti: { ticker: "MARUTI.NS", companyName: "Maruti Suzuki India Limited" },
+
   "state bank": { ticker: "SBIN.NS", companyName: "State Bank of India" },
   sbi: { ticker: "SBIN.NS", companyName: "State Bank of India" },
-  "lt": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
-  "larsen toubro": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
-  "larsen & toubro": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
-  "sun pharma": { ticker: "SUNPHARMA.NS", companyName: "Sun Pharmaceutical Industries Limited" },
-  "dr reddy": { ticker: "DRREDDY.NS", companyName: "Dr. Reddy's Laboratories Limited" },
+
+  "sun pharma": { ticker: "SUNPHARMA.NS", companyName: "Sun Pharmaceutical Industries" },
   "asian paints": { ticker: "ASIANPAINT.NS", companyName: "Asian Paints Limited" },
   "ultratech cement": { ticker: "ULTRACEMCO.NS", companyName: "UltraTech Cement Limited" },
   "hcl tech": { ticker: "HCLTECH.NS", companyName: "HCL Technologies Limited" },
   "hcl technologies": { ticker: "HCLTECH.NS", companyName: "HCL Technologies Limited" },
+  "lt": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
+  "larsen toubro": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
+  "larsen & toubro": { ticker: "LT.NS", companyName: "Larsen & Toubro Limited" },
+  zomato: { ticker: "ZOMATO.NS", companyName: "Zomato Limited" },
+  paytm: { ticker: "PAYTM.NS", companyName: "One97 Communications (Paytm)" },
+  nykaa: { ticker: "NYKAA.NS", companyName: "FSN E-Commerce Ventures (Nykaa)" },
+  ola: { ticker: "OLAELEC.NS", companyName: "Ola Electric Mobility" },
 };
 
 const extractedCompaniesSchema = z.object({
@@ -249,17 +267,27 @@ export async function resolveCompany(query: string): Promise<ResolveResult> {
         const symbolLower = bestMatch.symbol.toLowerCase();
         const symbolWithoutExchange = symbolLower.split(".")[0];
         const queryLower = cleanQuery.toLowerCase();
-        const queryWords = queryLower.split(/\s+/);
+        const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
         
+        // Relaxed matching: accept if name/symbol overlaps with any meaningful query word,
+        // or if the query overlaps with the company name (handles Indian, European, etc. companies)
         const isMatch = 
           nameLower.includes(queryLower) || 
           queryLower.includes(nameLower) ||
           symbolLower === queryLower || 
           symbolWithoutExchange === queryLower ||
-          queryWords.some(word => word.length > 2 && (nameLower.includes(word) || symbolWithoutExchange.includes(word)));
+          queryWords.some(word => nameLower.includes(word) || symbolWithoutExchange.includes(word)) ||
+          queryWords.some(word => word.includes(symbolWithoutExchange));
 
         if (isMatch) {
           const resolution = { ticker: bestMatch.symbol, companyName: bestMatch.name };
+          resolutionCache.set(cacheKey, resolution);
+          return { success: true, resolution };
+        }
+
+        // Last resort: if FMP returned results and query is >= 4 chars, trust the top result
+        if (queryLower.length >= 4 && ranked.length > 0) {
+          const resolution = { ticker: ranked[0].symbol, companyName: ranked[0].name };
           resolutionCache.set(cacheKey, resolution);
           return { success: true, resolution };
         }
@@ -329,6 +357,42 @@ export function extractCandidateNames(message: string): string[] {
     const coveredByAlias = coveredRanges.some(([s, e]) => idx >= s && end <= e);
     if (!coveredByAlias) {
       candidates.add(word);
+    }
+  }
+
+  // 4. If no candidates found yet, try to extract meaningful noun phrases from the
+  //    lowercased message (handles queries like "analyze hdfc bank" or "tell me about icici")
+  if (candidates.size === 0) {
+    // Strip common filler words and use the remaining phrase as a candidate
+    const fillerWords = new Set([
+      "i", "should", "buy", "sell", "hold", "what", "why", "how", "when", "where", "who",
+      "is", "are", "the", "and", "or", "but", "for", "to", "in", "on", "at", "by", "with",
+      "about", "against", "explain", "describe", "which", "compare", "me", "tell", "show",
+      "give", "a", "an", "of", "my", "can", "do", "does", "did", "has", "have", "had",
+      "will", "would", "could", "should", "shall", "may", "might", "must", "let", "get",
+      "analyze", "analysis", "research", "report", "stock", "company", "investment", "buddy",
+      "today", "now", "please", "find", "look", "check", "vs", "versus",
+    ]);
+    const words = lowercaseMessage
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 1 && !fillerWords.has(w));
+
+    if (words.length > 0) {
+      // Try multi-word combinations first (up to 3 words), then single words
+      if (words.length >= 2) {
+        // Try all consecutive 2-word and 3-word combinations
+        for (let i = 0; i < words.length - 1; i++) {
+          candidates.add(words.slice(i, i + 2).join(" "));
+          if (i < words.length - 2) {
+            candidates.add(words.slice(i, i + 3).join(" "));
+          }
+        }
+      }
+      // Also add individual words
+      for (const word of words) {
+        if (word.length > 2) candidates.add(word);
+      }
     }
   }
 

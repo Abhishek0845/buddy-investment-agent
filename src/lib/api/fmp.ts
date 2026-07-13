@@ -63,9 +63,23 @@ async function executeFmpRequest<T>(
         signal: controller.signal,
       });
 
+      let responseData = response.data;
+
+      // FMP stable API wraps array responses in { value: [...], Count: N }
+      // Unwrap this envelope so all callers receive a plain array as before
+      if (
+        responseData &&
+        typeof responseData === "object" &&
+        !Array.isArray(responseData) &&
+        "value" in (responseData as Record<string, unknown>) &&
+        Array.isArray((responseData as Record<string, unknown>)["value"])
+      ) {
+        responseData = (responseData as Record<string, unknown>)["value"] as T;
+      }
+
       // Check response body for Error Message indicating quota/limit
-      if (response.data && typeof response.data === "object" && !Array.isArray(response.data)) {
-        const dataObj = response.data as Record<string, unknown>;
+      if (responseData && typeof responseData === "object" && !Array.isArray(responseData)) {
+        const dataObj = responseData as Record<string, unknown>;
         if ("Error Message" in dataObj || "error" in dataObj) {
           const errMsg = String(dataObj["Error Message"] || dataObj["error"]);
           if (
@@ -78,14 +92,14 @@ async function executeFmpRequest<T>(
         }
       }
 
-      return response.data;
+      return responseData as T;
     } catch (error) {
       if (error instanceof FmpQuotaError) {
         throw error;
       }
       if (axios.isAxiosError(error)) {
-        if (error.response?.status === 429) {
-          throw new FmpQuotaError("FMP API Rate limit/quota exceeded");
+        if (error.response?.status === 429 || error.response?.status === 402) {
+          throw new FmpQuotaError("FMP API subscription plan does not support this ticker. Please upgrade or use a major US stock.");
         }
         const responseData = error.response?.data;
         if (responseData && typeof responseData === "object" && !Array.isArray(responseData)) {
@@ -93,7 +107,9 @@ async function executeFmpRequest<T>(
           if (
             errMsg.includes("Limit Reach") ||
             errMsg.includes("upgrade your subscription plan") ||
-            errMsg.includes("quota")
+            errMsg.includes("quota") ||
+            errMsg.includes("Premium") ||
+            errMsg.includes("subscription")
           ) {
             throw new FmpQuotaError(errMsg);
           }
