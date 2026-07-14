@@ -58,11 +58,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { message, activeResearchContext, dashboardData } = parseResult.data;
+  const { message, activeResearchContext, dashboardData, hasDashboard } = parseResult.data;
   logger.info("API request received", {
     requestId,
     ip,
     messageLength: message.length,
+    hasDashboard: hasDashboard ?? false,
   });
 
   let detectedIntent = "UNKNOWN";
@@ -78,8 +79,19 @@ export async function POST(req: NextRequest) {
           companyCount = intentData.tickers?.length || 0;
         }
 
-        controller.enqueue(encoder.encode(`event: ${event}\n`));
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        // Stamp requestId on every event so the frontend can filter stale events.
+        const payload =
+          typeof data === "object" && data !== null
+            ? { ...(data as object), requestId }
+            : { data, requestId };
+
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        } catch (e) {
+          // The client disconnected and the controller is closed. Ignore.
+          logger.debug("Attempted to enqueue to a closed controller, ignoring.", { requestId });
+        }
       };
 
       try {
@@ -90,6 +102,7 @@ export async function POST(req: NextRequest) {
           dashboardData: dashboardData || null,
           activeResearchContext: activeResearchContext || null,
           error: null,
+          hasDashboard: hasDashboard ?? false,
         };
 
         logger.info("Starting LangGraph execution", { requestId, ip });
@@ -140,7 +153,11 @@ export async function POST(req: NextRequest) {
           message: clientMsg,
         });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch (e) {
+          // ignore already closed
+        }
       }
     },
   });

@@ -51,48 +51,26 @@ export default function Home() {
     if (!activeTabId) return;
     const tab = tabs.find((t) => t.id === activeTabId);
     if (tab) {
-      let currentDashboardData = tab.dashboardData;
-      const globalContext = useDashboardStore.getState().activeResearchContext;
+      const currentDashboardData = tab.dashboardData;
 
-      // Auto-populate tab if its single company report is already in the global reports cache
-      if (!tab.isAnalyzed && tab.tickers.length === 1 && globalContext?.reports?.[tab.tickers[0]]) {
-        const companyReport = globalContext.reports[tab.tickers[0]];
-        currentDashboardData = {
-          type: "SINGLE",
-          companies: [companyReport]
-        };
-        // Update the tab in tabStore
-        useTabStore.setState({
-          tabs: tabs.map(t => t.id === tab.id ? {
-            ...t,
-            isAnalyzed: true,
-            dashboardData: currentDashboardData
-          } : t)
-        });
-      }
-
+      // Restore dashboard data from the tab's own stored data
       useDashboardStore.getState().setDashboardData(currentDashboardData);
 
-      // Construct a merged context to preserve global reports cache
+      // Stage 7: Tab-isolated context restoration.
+      // Use ONLY this tab's own context \u2014 no global context merge.
+      // The global merge was the root cause of cross-company QA contamination.
       const tabContext = tab.activeResearchContext;
-      const mergedContext: ActiveResearchContext = {
-        activeTickers: tab.tickers,
-        reportType: currentDashboardData?.type === "MULTI" ? "MULTI" : "SINGLE",
-        conversationMetadata: {
-          lastInteraction: tabContext?.conversationMetadata?.lastInteraction || "",
-          chatHistory: tabContext?.conversationMetadata?.chatHistory || []
-        },
-        portfolioPositions: {
-          ...(globalContext?.portfolioPositions || {}),
-          ...(tabContext?.portfolioPositions || {})
-        },
-        reports: {
-          ...(globalContext?.reports || {}),
-          ...(tabContext?.reports || {})
-        }
-      };
+      const isolatedContext: ActiveResearchContext | null = tabContext
+        ? {
+            activeTickers: tab.tickers,
+            reportType: currentDashboardData?.type === "MULTI" ? "MULTI" : "SINGLE",
+            conversationMetadata: tabContext.conversationMetadata || { lastInteraction: "", chatHistory: [] },
+            portfolioPositions: tabContext.portfolioPositions || {},
+            reports: tabContext.reports || {},
+          }
+        : null;
 
-      useDashboardStore.setState({ activeResearchContext: mergedContext });
+      useDashboardStore.setState({ activeResearchContext: isolatedContext });
 
       if (tab.chatSessionId) {
         useChatStore.getState().setActiveSessionId(tab.chatSessionId);

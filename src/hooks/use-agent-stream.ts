@@ -4,38 +4,12 @@ import { useDashboardStore } from "@/store/use-dashboard-store";
 import { useTabStore } from "@/store/use-tab-store";
 import { ActiveResearchContext } from "@/types";
 
-function extractDeterministicTickers(input: string): string[] {
-  const stopWords = new Set([
-    "I", "A", "AND", "OR", "BUT", "FOR", "TO", "IN", "ON", "AT", "BY", "WITH", "US"
-  ]);
-  const resolved = new Set<string>();
-  const uppercaseWords = input.match(/\b[A-Z]{1,5}\b/g) || [];
-  for (const item of uppercaseWords) {
-    if (!stopWords.has(item)) {
-      resolved.add(item);
-    }
-  }
-  return Array.from(resolved);
-}
 
-const isNewResearchQuery = (resolved: string[], activeTabTickers: string[], message: string): boolean => {
-  if (resolved.length === 0) return false;
-
-  const hasQuestionKeywords = /\b(why|how|what|explain|describe|question|which|who|where|when|compare|difference|score|thesis|strength|weakness|risk)\b/i.test(message);
-  if (hasQuestionKeywords) return false;
-
-  if (activeTabTickers.length > 0) {
-    const mentionsActive = activeTabTickers.some(t => resolved.includes(t.toUpperCase()));
-    const mentionsOthers = resolved.some(t => !activeTabTickers.includes(t.toUpperCase()));
-    if (mentionsActive && !mentionsOthers) {
-      return false; // Follow up on active tab
-    }
-  }
-  return true;
-};
 
 export function useAgentStream() {
   const abortControllerRef = useRef<AbortController | null>(null);
+  /** Tracks the current request ID to filter stale SSE events. */
+  const activeRequestIdRef = useRef<string | null>(null);
 
   const isGenerating = useChatStore((s) => s.isGenerating);
   const setIsGenerating = useChatStore((s) => s.setIsGenerating);
@@ -68,6 +42,12 @@ export function useAgentStream() {
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+
+      // Generate a unique ID for this request.
+      // SSE events stamped with a different requestId are stale (from a prior request)
+      // and will be silently ignored.
+      const currentRequestId = crypto.randomUUID();
+      activeRequestIdRef.current = currentRequestId;
 
       // 1. Immediately update UI state and append user message
       setIsGenerating(true);
@@ -115,144 +95,9 @@ export function useAgentStream() {
       // Kick off network request pipeline asynchronously
       (async () => {
         try {
-          // Asynchronously resolve tickers from query
-          let resolved: string[] = [];
-          try {
-            const resolveRes = await fetch("/api/resolve", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ message }),
-              signal: controller.signal,
-            });
-            if (resolveRes.ok) {
-              const resolveData = await resolveRes.json();
-              resolved = resolveData.tickers || [];
-            } else {
-              resolved = extractDeterministicTickers(message);
-            }
-          } catch (err) {
-            if (err instanceof Error && err.name === "AbortError") {
-              console.log("Resolution call aborted.");
-              return;
-            }
-            console.error("Failed to resolve tickers, using fallback", err);
-            resolved = extractDeterministicTickers(message);
-          }
-
-          // Determine active tab state
-          const tabStore = useTabStore.getState();
-          const activeTab = tabStore.tabs.find((t) => t.id === tabStore.activeTabId);
-          const activeTabTickers = activeTab?.tickers || [];
-
-          // Determine query intent
-          let isNewResearch = isNewResearchQuery(resolved, activeTabTickers, message);
-
-          let targetTabId = tabStore.activeTabId || "new-research";
-          let targetSessionId = useChatStore.getState().activeSessionId || "";
-
-          // Tab switching / loading logic
-          if (resolved.length > 0) {
-            const resolvedTicker = resolved.length === 1 ? resolved[0] : resolved.sort().join("_");
-            const displayTitle = resolved.length === 1 ? resolved[0] : resolved.join(" vs ");
-            const hasRefresh = /\b(refresh|reload|re-run)\b/i.test(message);
-
-            // Check if an analyzed tab already exists for this symbol / comparison
-            const existingTab = tabStore.tabs.find(
-              (t) => t.id.toUpperCase() === resolvedTicker.toUpperCase()
-            );
-
-            if (existingTab && existingTab.isAnalyzed && !hasRefresh) {
-              tabStore.setActiveTabId(existingTab.id);
-              targetTabId = existingTab.id;
-              targetSessionId = existingTab.chatSessionId; // Update session target
-              
-              // Load context and dashboard data from existing tab
-              setDashboardData(existingTab.dashboardData);
-              useDashboardStore.setState({ 
-                activeResearchContext: existingTab.activeResearchContext,
-                tickers: existingTab.tickers
-              });
-              
-              isNewResearch = false; // Turn off new research since we have it already
-            } else if (isNewResearch) {
-              // If this is a comparison query, also ensure individual tabs are created in the background!
-              if (resolved.length > 1) {
-                for (const ticker of resolved) {
-                  const companyTabId = ticker.toUpperCase();
-                  const companyExisting = tabStore.tabs.find(t => t.id.toUpperCase() === companyTabId);
-                  if (!companyExisting) {
-                    const companySessionId = useChatStore.getState().createSession(`Research ${ticker}`);
-                    tabStore.addTab(companyTabId, ticker, companySessionId, [ticker]);
-                  }
-                }
-              }
-
-              let tabSessionId = targetSessionId;
-              if (tabStore.activeTabId === "new-research") {
-                // Allocate a new session for "+ New Research" so it stays clean
-                const newSessionForNewResearch = useChatStore.getState().createSession("New Research Session");
-                useTabStore.setState({
-                  tabs: tabStore.tabs.map((t) =>
-                    t.id === "new-research"
-                      ? { ...t, chatSessionId: newSessionForNewResearch }
-                      : t
-                  ),
-                });
-              } else {
-                // We started from an existing tab, create a new separate session for the new tab
-                tabSessionId = useChatStore.getState().createSession(`Research ${displayTitle}`);
-              }
-
-              tabStore.addTab(resolvedTicker, displayTitle, tabSessionId, resolved);
-              targetTabId = resolvedTicker;
-              targetSessionId = tabSessionId;
-
-              // Reset dashboard for the new analysis tab
-              setDashboardData(null);
-              useDashboardStore.setState({ 
-                activeResearchContext: null,
-                tickers: resolved
-              });
-            }
-          } else if (isNewResearch) {
-            setDashboardData(null);
-            useDashboardStore.setState({ 
-              activeResearchContext: null,
-              tickers: []
-            });
-          }
-
-          // Update loading state based on actual research intent
-          setIsLoading(isNewResearch);
-
-          // Migrate/move user message to the new session if targetSessionId changed
-          if (targetSessionId && targetSessionId !== initialSessionId) {
-            useChatStore.setState((state) => {
-              const sourceSession = state.sessions.find(s => s.id === initialSessionId);
-              if (!sourceSession) return {};
-
-              const userMsgIndex = sourceSession.messages.findLastIndex(m => m.role === "user");
-              if (userMsgIndex === -1) return {};
-
-              const messagesToMove = sourceSession.messages.slice(userMsgIndex);
-              const remainingMessages = sourceSession.messages.slice(0, userMsgIndex);
-
-              return {
-                sessions: state.sessions.map((s) => {
-                  if (s.id === initialSessionId) {
-                    return { ...s, messages: remainingMessages, updatedAt: Date.now() };
-                  }
-                  if (s.id === targetSessionId) {
-                    return { ...s, messages: [...s.messages, ...messagesToMove], updatedAt: Date.now() };
-                  }
-                  return s;
-                }),
-                activeSessionId: targetSessionId,
-              };
-            });
-          } else if (targetSessionId) {
-            useChatStore.getState().setActiveSessionId(targetSessionId);
-          }
+          let targetTabId = useTabStore.getState().activeTabId || "new-research";
+          let targetSessionId = initialSessionId;
+          let pendingTabCreation: { id: string; title: string; sessionId: string; tickers: string[]; } | null = null;
 
           // Read active contexts
           const activeResearchContext = useDashboardStore.getState().activeResearchContext;
@@ -265,7 +110,7 @@ export function useAgentStream() {
             const chatHistory = messages
               .filter(m => m.content.trim())
               .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
-            
+
             contextWithHistory = {
               ...activeResearchContext,
               conversationMetadata: {
@@ -275,15 +120,20 @@ export function useAgentStream() {
             };
           }
 
+          // Determine if there is already an analyzed dashboard for the current tab
+          const currentTab = useTabStore.getState().tabs.find(t => t.id === targetTabId);
+          const hasDashboard = !!(currentTab?.isAnalyzed && currentTab?.dashboardData);
+
           const response = await fetch("/api/agent", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
               message,
               activeResearchContext: contextWithHistory,
-              dashboardData
+              dashboardData,
+              hasDashboard,
             }),
             signal: controller.signal,
           });
@@ -327,13 +177,100 @@ export function useAgentStream() {
                 try {
                   const data = JSON.parse(dataStr);
 
+                  // Stage 3: Filter stale SSE events if the user started a new request
+                  if (activeRequestIdRef.current !== currentRequestId) {
+                    continue;
+                  }
+
                   switch (eventType) {
                     case "intent":
                       if (data.intent) {
+                        const isNewResearch = data.intent === "SINGLE" || data.intent === "MULTI";
+                        setIsLoading(isNewResearch);
+
                         useDashboardStore.setState({
                           intent: data.intent,
                           tickers: data.tickers || [],
                         });
+
+                        if (isNewResearch && data.tickers && data.tickers.length > 0) {
+                          setDashboardData(null);
+                          useDashboardStore.setState({ activeResearchContext: null });
+                          
+                          const resolved = data.tickers;
+                          const resolvedTicker = resolved.length === 1 ? resolved[0] : resolved.sort().join("_");
+                          const displayTitle = resolved.length === 1 ? resolved[0] : resolved.join(" vs ");
+                          const hasRefresh = /\b(refresh|reload|re-run)\b/i.test(message);
+                          
+                          const tabStore = useTabStore.getState();
+                          const existingTab = tabStore.tabs.find(t => t.id.toUpperCase() === resolvedTicker.toUpperCase());
+
+                          if (existingTab && existingTab.isAnalyzed && !hasRefresh) {
+                            tabStore.setActiveTabId(existingTab.id);
+                            targetTabId = existingTab.id;
+                            targetSessionId = existingTab.chatSessionId;
+                            
+                            setDashboardData(existingTab.dashboardData);
+                            useDashboardStore.setState({ 
+                              activeResearchContext: existingTab.activeResearchContext,
+                            });
+                            setIsLoading(false); // Instantly loaded from cache!
+                          } else {
+                            if (resolved.length > 1) {
+                              for (const ticker of resolved) {
+                                const companyTabId = ticker.toUpperCase();
+                                const companyExisting = tabStore.tabs.find(t => t.id.toUpperCase() === companyTabId);
+                                if (!companyExisting) {
+                                  const companySessionId = useChatStore.getState().createSession(`Research ${ticker}`);
+                                  tabStore.addTab(companyTabId, ticker, companySessionId, [ticker]);
+                                }
+                              }
+                            }
+                            
+                            let tabSessionId = targetSessionId;
+                            if (tabStore.activeTabId === "new-research") {
+                              const newSessionForNewResearch = useChatStore.getState().createSession("New Research Session");
+                              useTabStore.setState({
+                                tabs: tabStore.tabs.map((t) =>
+                                  t.id === "new-research" ? { ...t, chatSessionId: newSessionForNewResearch } : t
+                                ),
+                              });
+                            } else {
+                              tabSessionId = useChatStore.getState().createSession(`Research ${displayTitle}`);
+                            }
+                            
+                            pendingTabCreation = {
+                              id: resolvedTicker,
+                              title: displayTitle,
+                              sessionId: tabSessionId,
+                              tickers: resolved,
+                            };
+                            targetTabId = resolvedTicker;
+                            targetSessionId = tabSessionId;
+                          }
+
+                          // Move messages if targetSessionId changed
+                          if (targetSessionId && targetSessionId !== initialSessionId) {
+                            useChatStore.setState((state) => {
+                              const sourceSession = state.sessions.find(s => s.id === initialSessionId);
+                              if (!sourceSession) return {};
+                              const userMsgIndex = sourceSession.messages.findLastIndex(m => m.role === "user");
+                              if (userMsgIndex === -1) return {};
+                              const messagesToMove = sourceSession.messages.slice(userMsgIndex);
+                              const remainingMessages = sourceSession.messages.slice(0, userMsgIndex);
+                              return {
+                                sessions: state.sessions.map((s) => {
+                                  if (s.id === initialSessionId) return { ...s, messages: remainingMessages, updatedAt: Date.now() };
+                                  if (s.id === targetSessionId) return { ...s, messages: [...s.messages, ...messagesToMove], updatedAt: Date.now() };
+                                  return s;
+                                }),
+                                activeSessionId: targetSessionId,
+                              };
+                            });
+                          } else if (targetSessionId) {
+                            useChatStore.getState().setActiveSessionId(targetSessionId);
+                          }
+                        }
                       }
                       break;
                     case "progress":
@@ -341,6 +278,19 @@ export function useAgentStream() {
                       setProgressSteps((prev) => [...prev, data.message]);
                       break;
                     case "dashboard":
+                      // Stage 5: Defer tab creation to after dashboard event fires
+                      if (pendingTabCreation) {
+                        useTabStore.getState().addTab(
+                          pendingTabCreation.id,
+                          pendingTabCreation.title,
+                          pendingTabCreation.sessionId,
+                          pendingTabCreation.tickers
+                        );
+                        useTabStore.getState().setActiveTabId(pendingTabCreation.id);
+                        // Update the chat session to match the new tab
+                        useChatStore.getState().setActiveSessionId(pendingTabCreation.sessionId);
+                        pendingTabCreation = null;
+                      }
                       setDashboardData(data);
                       // Save to tab workspace
                       useTabStore.getState().updateTabReport(
@@ -349,46 +299,19 @@ export function useAgentStream() {
                         useDashboardStore.getState().activeResearchContext || ({} as ActiveResearchContext)
                       );
                       break;
-                    case "context":
-                      if (!data) {
+                    case "context": {
+                        if (!data) {
+                          break;
+                        }
+                        useDashboardStore.setState({ activeResearchContext: data });
+                        // Save context to this tab only.
+                        // Stage 4: Cross-tab propagation removed — each tab stays isolated.
+                        const currentD = useDashboardStore.getState().dashboardData;
+                        if (currentD) {
+                          useTabStore.getState().updateTabReport(targetTabId, currentD, data);
+                        }
                         break;
-                      }
-                      useDashboardStore.setState({ activeResearchContext: data });
-                      // Save context to tab workspace
-                      const currentD = useDashboardStore.getState().dashboardData;
-                      if (currentD) {
-                        useTabStore.getState().updateTabReport(targetTabId, currentD, data);
-                      }
-                      // Also propagate the reports to all other tabs in the store if data is not null!
-                      useTabStore.setState({
-                        tabs: useTabStore.getState().tabs.map(tab => {
-                          if (tab.id !== targetTabId) {
-                            const tabCtx = tab.activeResearchContext || {
-                              activeTickers: tab.tickers,
-                              reportType: tab.dashboardData?.type === "MULTI" ? "MULTI" : "SINGLE",
-                              conversationMetadata: { lastInteraction: "", chatHistory: [] },
-                              reports: {},
-                              portfolioPositions: {}
-                            };
-                            return {
-                              ...tab,
-                              activeResearchContext: {
-                                 ...tabCtx,
-                                 reports: {
-                                   ...tabCtx.reports,
-                                   ...(data.reports || {})
-                                 },
-                                 portfolioPositions: {
-                                   ...tabCtx.portfolioPositions,
-                                   ...(data.portfolioPositions || {})
-                                 }
-                              }
-                            };
-                          }
-                          return tab;
-                        })
-                      });
-                      break;
+                    }
                     case "chat":
                       bufferToken(data.token);
                       break;

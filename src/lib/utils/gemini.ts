@@ -20,6 +20,7 @@ if (!globalForGemini.llm) {
     model: modelName,
     apiKey: apiKey,
     temperature: 0.2,
+    maxRetries: 0,
   });
 }
 
@@ -28,6 +29,7 @@ if (!globalForGemini.llmForResolution) {
     model: modelName,
     apiKey: apiKey,
     temperature: 0.1,
+    maxRetries: 0,
   });
 }
 

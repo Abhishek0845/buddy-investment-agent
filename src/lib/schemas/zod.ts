@@ -98,6 +98,8 @@ export const agentRequestSchema = z.object({
   message: z.string().trim().min(1, "Message is required").max(500, "Message is too long"),
   activeResearchContext: z.any().nullable().optional(),
   dashboardData: z.any().nullable().optional(),
+  hasDashboard: z.boolean().optional().default(false),
+  requestId: z.string().optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 

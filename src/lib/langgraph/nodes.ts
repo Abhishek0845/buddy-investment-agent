@@ -1,7 +1,7 @@
 import pLimit from "p-limit";
-import { useTabStore } from "@/store/use-tab-store";
-import { resolveCompany, resolveCompanyTickers, resolveCompanyTickersBulk } from "@/services/companyResolver";
+import { resolveCompany, resolveCompanyTickersBulk } from "@/services/companyResolver";
 import { AgentState } from "./state";
+import { deterministicPreRouter } from "./router";
 import {
   intentSchema,
   thesisSchema,
@@ -25,12 +25,6 @@ interface NodeConfig {
     requestId?: string;
   };
 }
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function extractDeterministicTickers(input: string): Promise<string[]> {
-  return await resolveCompanyTickers(input);
-}
-
 
 const PORTFOLIO_PROMPT = `You are a portfolio position parser. Your task is to extract details about a user's stock holdings from their message.
 Analyze the message and extract:
@@ -59,6 +53,7 @@ export async function intentRouterNode(
     requestId,
     userInput: state.userInput,
     hasActiveContext: !!state.activeResearchContext,
+    hasDashboard: state.hasDashboard,
     cachedTickers: Object.keys(state.activeResearchContext?.reports || {}),
   });
 
@@ -66,11 +61,42 @@ export async function intentRouterNode(
   const userInput = state.userInput;
   let result: Partial<typeof AgentState.State> | undefined = undefined;
 
-  // Try to parse portfolio details
+  // ─── Stage 1: Deterministic Pre-Router ──────────────────────────────────────
+  // Runs before ANY LLM or FMP call. Guards out-of-domain traffic at the gate.
+  const preRouteDecision = deterministicPreRouter({
+    userInput,
+    hasDashboard: state.hasDashboard,
+    activeTickers: state.activeResearchContext?.activeTickers,
+  });
+
+  logger.info("[PIPELINE] Step 1a: Deterministic pre-router decision", {
+    requestId,
+    preRouteDecision,
+    hasDashboard: state.hasDashboard,
+  });
+
+  // FOLLOW_UP fast-path: dashboard exists, no financial signals, no ticker.
+  // Skip all company resolution — go straight to QA.
+  if (preRouteDecision === "FOLLOW_UP") {
+    logger.info("[PIPELINE] Pre-router: FOLLOW_UP fast-path — skipping company resolution", { requestId });
+    if (sendEvent) {
+      sendEvent("intent", { intent: "FOLLOW_UP", tickers: [] });
+    }
+    const duration = Date.now() - startTime;
+    logger.info("[PIPELINE] intentRouterNode finished (pre-router FOLLOW_UP)", { requestId, durationMs: duration });
+    return {
+      intent: "FOLLOW_UP",
+      tickers: [],
+      error: null,
+      activeResearchContext: state.activeResearchContext,
+    };
+  }
+
+  // ─── Portfolio Position Extraction ──────────────────────────────────────────
   const hasPositionKeywords = /\b(own|holding|shares|bought|buy price|average price|average cost|sell|reduce|exit|average down|book profits|profit|loss|portfolio|position|down \d+%|up \d+%)\b/i.test(userInput);
   let extractedPosition: PortfolioPositionResponse | null = null;
   let activeResearchContext = state.activeResearchContext;
-  
+
   const activeTickers = activeResearchContext?.activeTickers || [];
   const activeTicker = activeTickers[0] || null;
 
@@ -128,114 +154,66 @@ export async function intentRouterNode(
     }
   }
 
-  // 1. Try deterministic routing first
-  // Resolve company tickers (deterministic + LLM fallback) before intent classification
-  const bulkResult = await resolveCompanyTickersBulk(userInput);
-  let resolved = bulkResult.tickers;
+  // ─── Stage 2: Company Resolution ────────────────────────────────────────────
+  // RESEARCH path: resolve tickers from the raw message (bulk resolver).
+  // GEMINI_INTENT path: call Gemini for intent, then resolve only the company
+  //   NAMES returned by Gemini (never the raw user message).
 
-  logger.info("[PIPELINE] Step 2: Company resolution completed", {
-    requestId,
-    userInput,
-    bulkStatus: bulkResult.status,
-    resolvedTickers: resolved,
-    unresolved: bulkResult.unresolved,
-  });
+  if (preRouteDecision === "RESEARCH") {
+    const bulkResult = await resolveCompanyTickersBulk(userInput);
+    const resolved = bulkResult.tickers;
 
-  // Early error handling for bulk resolution
-  if (bulkResult.status === "rate_limit") {
-    result = {
-      intent: "OUT_OF_DOMAIN",
-      tickers: [],
-      error: "Market data provider API rate limit reached. Please wait a moment and try again."
-    };
-  } else if (bulkResult.status === "network_error") {
-    result = {
-      intent: "OUT_OF_DOMAIN",
-      tickers: [],
-      error: "A network error occurred while resolving the company. Please check your connection."
-    };
-  }
+    logger.info("[PIPELINE] Step 2: Company resolution completed (RESEARCH path)", {
+      requestId,
+      bulkStatus: bulkResult.status,
+      resolvedTickers: resolved,
+      unresolved: bulkResult.unresolved,
+    });
 
-  // If no tickers resolved deterministically, attempt a direct company name resolution as fallback
-  if (resolved.length === 0) {
-    const directRes = await resolveCompany(userInput);
-    if (directRes.success) {
-      resolved = [directRes.resolution.ticker];
-      logger.info("[PIPELINE] Fallback direct company resolution succeeded", {
-        requestId,
-        ticker: directRes.resolution.ticker,
-        companyName: directRes.resolution.companyName,
-      });
-    } else {
-      logger.info("[PIPELINE] Direct company resolution also failed", {
-        requestId,
-        reason: directRes.reason,
-      });
+    if (bulkResult.status === "rate_limit") {
+      result = { intent: "OUT_OF_DOMAIN", tickers: [], error: "Market data provider API rate limit reached. Please wait a moment and try again." };
+    } else if (bulkResult.status === "network_error") {
+      result = { intent: "OUT_OF_DOMAIN", tickers: [], error: "A network error occurred while resolving the company. Please check your connection." };
     }
-  }
 
-  // Active workspace check (debug logging)
-  const tabState = useTabStore.getState();
-  const activeTabId = tabState.activeTabId;
-  logger.info("[PIPELINE] Step 3: Active workspace check", {
-    requestId,
-    activeTabId,
-    resolvedTickers: resolved,
-  });
+    // All resolved tickers already cached → FOLLOW_UP
+    if (!result?.intent && resolved.length > 0 && activeResearchContext?.reports) {
+      const allCached = resolved.every((t) => activeResearchContext!.reports?.[t]);
+      if (allCached) {
+        logger.info("[PIPELINE] All tickers cached — routing as FOLLOW_UP", { requestId, resolved });
+        result = { intent: "FOLLOW_UP", tickers: [], error: null };
+      }
+    }
 
-  // Cached report check: if any resolved ticker already has a report, treat as FOLLOW_UP
-  if (!result?.intent && resolved.length > 0 && activeResearchContext?.reports) {
-    const cachedTicker = resolved.find((t) => activeResearchContext.reports?.[t]);
-    if (cachedTicker) {
-      logger.info("[PIPELINE] Cached report found — routing as FOLLOW_UP", { requestId, cachedTicker });
-      result = { intent: "FOLLOW_UP", tickers: [], error: null };
+    if (!result?.intent) {
+      if (sendEvent) sendEvent("progress", { message: "Resolving company names..." });
+      if (resolved.length === 0) {
+        result = {
+          intent: "OUT_OF_DOMAIN",
+          tickers: [],
+          error: `CHAT_RESPONSE::I couldn't find a publicly traded company matching your query. Try US stocks like AAPL, NVDA, MSFT, or Indian ADRs like INFY.`,
+        };
+      } else {
+        const intent = resolved.length === 1 ? "SINGLE" : "MULTI";
+        result = { intent, tickers: resolved, error: null };
+      }
     }
-  }
-
-  const hasQuestionKeywords = /\b(why|how|what|explain|describe|question|which|who|where|when|difference|score|thesis|strength|weakness|risk|should|would|could|is|are|does|do|can)\b/i.test(userInput);
-  const allResolvedLoaded = resolved.length > 0 && resolved.every(t => activeResearchContext?.reports?.[t]);
-
-  // Determine target ticker for follow‑up checks
-  let targetTicker = resolved[0] || activeTicker;
-  if (extractedPosition?.ticker) {
-    const res = await resolveCompany(extractedPosition.ticker);
-    if (res.success) {
-      targetTicker = res.resolution.ticker;
-    }
-  }
-  const isReportLoaded = targetTicker && activeResearchContext?.reports?.[targetTicker];
-
-  // If we already have a result from error handling, skip further routing
-  if (!result?.intent && resolved.length > 0) {
-    if (sendEvent) {
-      sendEvent("progress", { message: "Resolving company names..." });
-    }
-    if (allResolvedLoaded && (resolved.length === 1 || hasQuestionKeywords)) {
-      result = { intent: "FOLLOW_UP", tickers: [], error: null };
-    } else {
-      const intent = resolved.length === 1 ? "SINGLE" : "MULTI";
-      result = { intent, tickers: resolved, error: null };
-    }
-  } else if (!result?.intent && activeResearchContext && (hasQuestionKeywords || (extractedPosition && extractedPosition.isPositionQuery && isReportLoaded))) {
-    if (sendEvent) {
-      sendEvent("progress", { message: "Analyzing query context..." });
-    }
-    result = { intent: "FOLLOW_UP", tickers: [], error: null };
-  } else if (!result?.intent) {
-    // 2. Fall back to Gemini slow-path classification
-    logger.info("[PIPELINE] No deterministic resolution — falling back to Gemini intent classifier", { requestId });
+  } else {
+    // GEMINI_INTENT path
+    logger.info("[PIPELINE] Step 2: Calling Gemini for intent classification", { requestId });
     try {
       const structuredLlm = llm.withStructuredOutput(intentSchema);
       const currentDate = new Date().toISOString().split("T")[0];
-      
       const wrappedInput = `<user_input>\n${userInput}\n</user_input>`;
-      
+
+      const activeTickersStr = (state.activeResearchContext?.activeTickers || []).join(", ") || "None";
+      const promptContext = INTENT_PROMPT
+        .replace("{currentDate}", currentDate)
+        .replace(/{activeTickers}/g, activeTickersStr);
+
       const response = await invokeLlmWithRetry(() =>
         structuredLlm.invoke([
-          {
-            role: "system",
-            content: INTENT_PROMPT.replace("{currentDate}", currentDate),
-          },
+          { role: "system", content: promptContext },
           { role: "user", content: wrappedInput },
         ])
       ) as IntentResponse & { error?: string };
@@ -243,54 +221,47 @@ export async function intentRouterNode(
       logger.info("[PIPELINE] Gemini intent classifier response", {
         requestId,
         geminiIntent: response.intent,
-        geminiTickers: response.tickers,
+        // response.tickers contains raw company names from Gemini, not resolved tickers
+        geminiCompanyNames: response.tickers,
       });
 
+      // ── CRITICAL: Gemini returns raw company NAMES in response.tickers.
+      // Pass each name individually to resolveCompany — NEVER pass the raw user message.
       const geminiResolved: string[] = [];
       const unresolvedNames: string[] = [];
       let rateLimitHit = false;
       let networkErrorHit = false;
 
       if (response.tickers && response.tickers.length > 0) {
-        for (const t of response.tickers) {
-          const res = await resolveCompany(t);
+        for (const companyName of response.tickers) {
+          const trimmedName = companyName.trim();
+          if (!trimmedName || trimmedName.length > 100) {
+            logger.warn("[PIPELINE] Skipping suspiciously long name from Gemini", { requestId, name: trimmedName });
+            continue;
+          }
+          const res = await resolveCompany(trimmedName);
           if (res.success) {
             geminiResolved.push(res.resolution.ticker);
           } else {
-            if (res.reason === "rate_limit") {
-              rateLimitHit = true;
-              break;
-            } else if (res.reason === "network_error") {
-              networkErrorHit = true;
-              break;
-            }
-            unresolvedNames.push(t);
+            if (res.reason === "rate_limit") { rateLimitHit = true; break; }
+            if (res.reason === "network_error") { networkErrorHit = true; break; }
+            unresolvedNames.push(trimmedName);
           }
         }
       }
 
-      if (sendEvent) {
-        sendEvent("progress", { message: "Resolving company names..." });
-      }
+      if (sendEvent) sendEvent("progress", { message: "Resolving company names..." });
 
       if (rateLimitHit) {
-        result = {
-          intent: "OUT_OF_DOMAIN",
-          tickers: [],
-          error: "Market data provider API rate limit reached. Please wait a moment and try again.",
-        };
+        result = { intent: "OUT_OF_DOMAIN", tickers: [], error: "Market data provider API rate limit reached. Please wait a moment and try again." };
       } else if (networkErrorHit) {
-        result = {
-          intent: "OUT_OF_DOMAIN",
-          tickers: [],
-          error: "A network error occurred while resolving the company. Please check your connection and try again.",
-        };
-      } else if (unresolvedNames.length > 0) {
+        result = { intent: "OUT_OF_DOMAIN", tickers: [], error: "A network error occurred while resolving the company. Please check your connection and try again." };
+      } else if (unresolvedNames.length > 0 && geminiResolved.length === 0) {
         const firstUnresolved = unresolvedNames[0];
         result = {
           intent: "OUT_OF_DOMAIN",
           tickers: [],
-          error: `CHAT_RESPONSE::I couldn't find a publicly traded company matching "${firstUnresolved}". ${firstUnresolved} is currently a private company, so I can't generate an investment report. Buddy currently supports publicly listed companies available through market data providers.`,
+          error: `CHAT_RESPONSE::I couldn't find a publicly traded company matching "${firstUnresolved}". ${firstUnresolved} may be a private company or not supported. Buddy supports publicly listed companies.`,
         };
       } else if (geminiResolved.length > 0 && (response.intent === "SINGLE" || response.intent === "MULTI")) {
         const finalIntent = geminiResolved.length === 1 ? "SINGLE" : "MULTI";
@@ -300,19 +271,15 @@ export async function intentRouterNode(
         } else {
           result = { intent: finalIntent, tickers: geminiResolved, error: null };
         }
+      } else if (response.intent === "FOLLOW_UP") {
+        result = { intent: "FOLLOW_UP", tickers: [], error: null };
+      } else if (response.intent === "KNOWLEDGE") {
+        result = { intent: "KNOWLEDGE", tickers: [], error: null };
       } else if (response.intent === "OUT_OF_DOMAIN") {
         const errMsg = response.error || "I am an AI Investment Research Assistant. I specialize in analyzing public companies, comparing stocks, and answering financial questions. I cannot assist with non-investment-related requests.";
-        result = {
-          intent: "OUT_OF_DOMAIN",
-          tickers: [],
-          error: "CHAT_RESPONSE::" + errMsg,
-        };
+        result = { intent: "OUT_OF_DOMAIN", tickers: [], error: "CHAT_RESPONSE::" + errMsg };
       } else {
-        result = { 
-          intent: response.intent || "OUT_OF_DOMAIN", 
-          tickers: [], 
-          error: response.error ? "CHAT_RESPONSE::" + response.error : null 
-        };
+        result = { intent: response.intent || "OUT_OF_DOMAIN", tickers: [], error: response.error ? "CHAT_RESPONSE::" + response.error : null };
       }
     } catch (e) {
       logger.error("[PIPELINE] Gemini classification failed — falling back to OUT_OF_DOMAIN", {
@@ -323,6 +290,19 @@ export async function intentRouterNode(
     }
   }
 
+  // Position query upgrade: if we have loaded context + position data, promote to FOLLOW_UP
+  const targetTicker = (result?.tickers || [])[0] || activeTicker;
+  const isReportLoaded = targetTicker && activeResearchContext?.reports?.[targetTicker];
+  if (
+    result?.intent !== "FOLLOW_UP" &&
+    result?.intent !== "SINGLE" &&
+    result?.intent !== "MULTI" &&
+    extractedPosition?.isPositionQuery &&
+    isReportLoaded
+  ) {
+    result = { ...result, intent: "FOLLOW_UP", tickers: [] };
+  }
+
   logger.info("[PIPELINE] Step 4: Intent routing decided", {
     requestId,
     intent: result?.intent,
@@ -330,11 +310,8 @@ export async function intentRouterNode(
     hasError: !!result?.error,
   });
 
-  // Stream intent event immediately
-  if (result?.intent) {
-    if (sendEvent) {
-      sendEvent("intent", { intent: result.intent, tickers: result.tickers || [] });
-    }
+  if (result?.intent && sendEvent) {
+    sendEvent("intent", { intent: result.intent, tickers: result.tickers || [] });
   }
 
   const duration = Date.now() - startTime;
@@ -347,6 +324,7 @@ export async function intentRouterNode(
 
   return { ...result, activeResearchContext: activeResearchContext || state.activeResearchContext };
 }
+
 
 export async function mapReduceFetchNode(
   state: typeof AgentState.State,
@@ -723,12 +701,27 @@ function buildOptimizedContext(context: ActiveResearchContext | null, dashboardD
     return dashboardData ? JSON.stringify(dashboardData, null, 2) : "No context available.";
   }
 
+  // Stage 6: QA Context Isolation
+  // Only include reports for tickers that belong to THIS tab's active research.
+  // This prevents cross-tab context leakage where a prior company's report
+  // bleeds into follow-up answers for a different company.
+  const activeTickerSet = new Set(
+    (context.activeTickers || []).map((t) => t.toUpperCase())
+  );
+  const filteredReports = Object.entries(context.reports).filter(
+    ([ticker]) => activeTickerSet.size === 0 || activeTickerSet.has(ticker.toUpperCase())
+  );
+
+  if (filteredReports.length === 0) {
+    return dashboardData ? JSON.stringify(dashboardData, null, 2) : "No context available.";
+  }
+
   const compact = {
     type: context.reportType,
     winner: dashboardData?.winner,
     comparisonSummary: dashboardData?.comparisonSummary,
     portfolioPositions: context.portfolioPositions,
-    companies: Object.values(context.reports).map((company) => ({
+    companies: filteredReports.map(([, company]) => ({
       companyName: company.companyName,
       ticker: company.ticker,
       currentPrice: company.currentPrice,
@@ -870,20 +863,22 @@ export async function qaNode(
       contextLength: context.length,
     });
 
-    const response = await invokeLlmWithRetry(() =>
-      llm.invoke(messages)
-    );
-
-    finalChatText = response.content as string;
+    // Stream the response so the user sees text immediately rather than waiting 3-5 seconds
+    const stream = await llm.stream(messages);
+    for await (const chunk of stream) {
+      const text = chunk.content as string;
+      if (text) {
+        finalChatText += text;
+        if (sendEvent) {
+          sendEvent("chat", { token: text });
+        }
+      }
+    }
 
     logger.info("[PIPELINE] Step 6: qaNode Gemini answer received", {
       requestId,
       responseLength: finalChatText.length,
     });
-
-    if (sendEvent) {
-      sendEvent("chat", { token: finalChatText });
-    }
   } catch (err) {
     logger.error("[PIPELINE] qaNode LLM call failed — using deterministic fallback", {
       requestId,

@@ -26,4 +26,13 @@ export const AgentState = Annotation.Root({
     reducer: (x, y) => y ?? x,
     default: () => null,
   }),
+  /**
+   * Set by the API route from the frontend payload.
+   * True when the current tab already has a completed dashboard loaded.
+   * Used by the deterministic pre-router to route to FOLLOW_UP without LLM.
+   */
+  hasDashboard: Annotation<boolean>({
+    reducer: (x, y) => y ?? x,
+    default: () => false,
+  }),
 });

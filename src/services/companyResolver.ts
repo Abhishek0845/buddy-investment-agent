@@ -269,28 +269,24 @@ export async function resolveCompany(query: string): Promise<ResolveResult> {
         const queryLower = cleanQuery.toLowerCase();
         const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
         
-        // Relaxed matching: accept if name/symbol overlaps with any meaningful query word,
-        // or if the query overlaps with the company name (handles Indian, European, etc. companies)
-        const isMatch = 
-          nameLower.includes(queryLower) || 
+        // Match only when there is meaningful overlap between the query and the result.
+        // Require at least a 4-character word match to avoid single-char false positives
+        // (e.g. "holiday" should NOT match "3PLAND.NS").
+        const meaningfulQueryWords = queryWords.filter(w => w.length >= 4);
+        const isMatch =
+          nameLower.includes(queryLower) ||
           queryLower.includes(nameLower) ||
-          symbolLower === queryLower || 
+          symbolLower === queryLower ||
           symbolWithoutExchange === queryLower ||
-          queryWords.some(word => nameLower.includes(word) || symbolWithoutExchange.includes(word)) ||
-          queryWords.some(word => word.includes(symbolWithoutExchange));
+          meaningfulQueryWords.some(word => nameLower.includes(word)) ||
+          meaningfulQueryWords.some(word => symbolWithoutExchange === word);
 
         if (isMatch) {
           const resolution = { ticker: bestMatch.symbol, companyName: bestMatch.name };
           resolutionCache.set(cacheKey, resolution);
           return { success: true, resolution };
         }
-
-        // Last resort: if FMP returned results and query is >= 4 chars, trust the top result
-        if (queryLower.length >= 4 && ranked.length > 0) {
-          const resolution = { ticker: ranked[0].symbol, companyName: ranked[0].name };
-          resolutionCache.set(cacheKey, resolution);
-          return { success: true, resolution };
-        }
+        // No confident match found — fail cleanly instead of guessing.
       }
     }
   } catch (err: unknown) {
