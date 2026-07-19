@@ -352,7 +352,7 @@ export async function mapReduceFetchNode(
   }
 
   const limit = pLimit(CONCURRENCY_LIMIT);
-  const hasRefresh = /\b(refresh|reload|re-run|update|again)\b/i.test(state.userInput || "");
+  // const hasRefresh = /\b(refresh|reload|re-run|update|again)\b/i.test(state.userInput || "");
   const existingMap = new Map<string, CompanyReport>();
   // Disabled caching to force fresh data fetch
   /*
@@ -482,6 +482,7 @@ export async function mapReduceFetchNode(
       // possibly retried). By this point the original error may already have
       // been wrapped into a ProviderUnavailableError — see the
       // "[LLM Retry] Original error BEFORE wrapping" log for the raw stack.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const errObj = e as any;
       logger.error(`[PIPELINE] Synthesis error detail for ${report.ticker}`, {
         requestId,
@@ -728,6 +729,7 @@ function buildOptimizedContext(context: ActiveResearchContext | null, dashboardD
     ([ticker]) => activeTickerSet.size === 0 || activeTickerSet.has(ticker.toUpperCase())
   );
 
+
   if (filteredReports.length === 0) {
     return dashboardData ? JSON.stringify(dashboardData, null, 2) : "No context available.";
   }
@@ -777,19 +779,19 @@ function buildOptimizedContext(context: ActiveResearchContext | null, dashboardD
   return JSON.stringify(compact, null, 2);
 }
 
-function isQuestionQuery(query: string): boolean {
-  const lowercase = query.toLowerCase().trim();
-  const questionWords = [
-    "why", "how", "what", "which", "who", "where", "when", "whether",
-    "is", "are", "do", "does", "did", "can", "could", "should", "would", "will", "shall",
-    "has", "have", "had", "was", "were"
-  ];
-  const hasQuestionMark = lowercase.includes("?");
-  const startsWithQuestionWord = questionWords.some(w => lowercase.startsWith(w + " ") || lowercase.startsWith(w + "'"));
-  const hasQuestionKeywords = /\b(why|how|what|explain|describe|question|which|who|where|when|compare|difference|score|thesis|strength|weakness|risk|should|would|could|is|are|does|do|can)\b/i.test(query);
-
-  return hasQuestionMark || startsWithQuestionWord || hasQuestionKeywords;
-}
+// function isQuestionQuery(query: string): boolean {
+//   const lowercase = query.toLowerCase().trim();
+//   const questionWords = [
+//     "why", "how", "what", "which", "who", "where", "when", "whether",
+//     "is", "are", "do", "does", "did", "can", "could", "should", "would", "will", "shall",
+//     "has", "have", "had", "was", "were"
+//   ];
+//   const hasQuestionMark = lowercase.includes("?");
+//   const startsWithQuestionWord = questionWords.some(w => lowercase.startsWith(w + " ") || lowercase.startsWith(w + "'"));
+//   const hasQuestionKeywords = /\b(why|how|what|explain|describe|question|which|who|where|when|compare|difference|score|thesis|strength|weakness|risk|should|would|could|is|are|does|do|can)\b/i.test(query);
+// 
+//   return hasQuestionMark || startsWithQuestionWord || hasQuestionKeywords;
+// }
 
 export async function qaNode(
   state: typeof AgentState.State,
@@ -804,7 +806,7 @@ export async function qaNode(
   });
 
   // 1. Build the context strictly from the active tab
-  const context = JSON.stringify(state.activeResearchContext, null, 2);
+  const context = buildOptimizedContext(state.activeResearchContext, state.dashboardData);
   const prompt = QA_PROMPT.replace("{activeResearchContext}", context);
 
   const charCount = context.length;
@@ -841,13 +843,15 @@ export async function qaNode(
     });
 
     // Inspect the OpenRouter response details before parsing response.content
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawResponse = response as any;
     logger.info("[QA Node] Raw AIMessage response from ChatOpenAI", {
       requestId,
       additional_kwargs: response.additional_kwargs,
       response_metadata: response.response_metadata,
       tool_calls: response.tool_calls,
-      invalid_tool_calls: (response as any).invalid_tool_calls,
-      usage_metadata: (response as any).usage_metadata,
+      invalid_tool_calls: rawResponse.invalid_tool_calls,
+      usage_metadata: rawResponse.usage_metadata,
       raw_json: JSON.parse(JSON.stringify(response)),
     });
 
@@ -868,6 +872,7 @@ export async function qaNode(
     return { error: `CHAT_RESPONSE::${response.content}` }; 
   } catch (error) {
     const duration = Date.now() - invokeStartTime;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const err = error as any;
     logger.error("[QA Node] Error occurred during LLM invocation", {
       requestId,

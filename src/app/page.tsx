@@ -57,7 +57,7 @@ export default function Home() {
       useDashboardStore.getState().setDashboardData(currentDashboardData);
 
       // Stage 7: Tab-isolated context restoration.
-      // Use ONLY this tab's own context \u2014 no global context merge.
+      // Use ONLY this tab's own context — no global context merge.
       // The global merge was the root cause of cross-company QA contamination.
       const tabContext = tab.activeResearchContext;
       const isolatedContext: ActiveResearchContext | null = tabContext

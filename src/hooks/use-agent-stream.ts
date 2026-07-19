@@ -4,8 +4,6 @@ import { useDashboardStore } from "@/store/use-dashboard-store";
 import { useTabStore } from "@/store/use-tab-store";
 import { ActiveResearchContext } from "@/types";
 
-
-
 export function useAgentStream() {
   const abortControllerRef = useRef<AbortController | null>(null);
   /** Tracks the current request ID to filter stale SSE events. */
@@ -358,19 +356,15 @@ export function useAgentStream() {
       addMessage,
       appendLastMessageContent,
       cleanEmptyMessages,
+      resetProgress,
+      setError,
       setIsGenerating,
       setIsLoading,
-      setError,
-      resetProgress,
       setDashboardData,
       setProgressMessage,
       setProgressSteps,
     ]
   );
 
-  return {
-    submitPrompt,
-    abort,
-    isGenerating,
-  };
+  return { submitPrompt, abort, isGenerating };
 }

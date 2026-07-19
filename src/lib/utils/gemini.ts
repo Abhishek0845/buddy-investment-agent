@@ -62,7 +62,6 @@ function stripMarkdownFences(text: string): string {
  * from tool-call arguments (tool-calling mode) and from content (json mode)
  * before the output parser attempts JSON.parse().
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function patchWithStructuredOutput(instance: ChatOpenAI): ChatOpenAI {
   const original = instance.withStructuredOutput.bind(instance);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,7 +175,7 @@ export async function invokeLlmWithRetry<T>(
         errorClass: err instanceof Error ? err.constructor.name : typeof err,
         errorMessage: errorDetails.message,
         isSyntaxError: err instanceof SyntaxError,
-        isZodError: (err as any)?.constructor?.name === "ZodError" || !!(err as any)?._errors,
+        isZodError: (err as Record<string, unknown>)?.constructor?.name === "ZodError" || !!(err as Record<string, unknown>)?._errors,
         looksLikeFenceError: typeof errorDetails.message === "string" && errorDetails.message.includes("`"),
         stack: err instanceof Error ? err.stack : undefined,
       });
