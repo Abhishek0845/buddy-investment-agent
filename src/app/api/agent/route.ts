@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
         try {
           controller.enqueue(encoder.encode(`event: ${event}\n`));
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-        } catch (e) {
+        } catch {
           // The client disconnected and the controller is closed. Ignore.
           logger.debug("Attempted to enqueue to a closed controller, ignoring.", { requestId });
         }
@@ -106,12 +106,21 @@ export async function POST(req: NextRequest) {
         };
 
         logger.info("Starting LangGraph execution", { requestId, ip });
-        await app.invoke(initialState, {
+        const finalState = await app.invoke(initialState, {
           configurable: {
             sendEvent,
             requestId, // pass requestId down to execution configuration
           },
         });
+
+        // qaNode encodes its LLM response as state.error with a "CHAT_RESPONSE::" prefix
+        // and connects directly to END (bypassing rejectNode which is the normal decoder).
+        // Intercept it here and emit the "chat" SSE event before "done" so the frontend
+        // can render the assistant message.
+        if (typeof finalState?.error === "string" && finalState.error.startsWith("CHAT_RESPONSE::")) {
+          const chatText = finalState.error.replace("CHAT_RESPONSE::", "");
+          sendEvent("chat", { token: chatText });
+        }
 
         logger.info("[PIPELINE] Step 7: LangGraph execution complete — sending done event", {
           requestId,
@@ -155,7 +164,7 @@ export async function POST(req: NextRequest) {
       } finally {
         try {
           controller.close();
-        } catch (e) {
+        } catch {
           // ignore already closed
         }
       }
