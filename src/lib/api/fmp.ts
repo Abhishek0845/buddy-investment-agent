@@ -1,4 +1,5 @@
 import axios from "axios";
+import { calculateRSI } from "@/lib/utils/rsi";
 import { getEnv } from "@/lib/validation/env";
 import {
   SearchResult,
@@ -7,7 +8,7 @@ import {
   HistoricalBar,
   FinancialMetric,
 } from "@/types/stock";
-import { InvalidTickerError } from "@/lib/errors";
+import { InvalidTickerError, ProviderUnavailableError } from "@/lib/errors";
 import { withRetry } from "@/lib/utils/retry";
 import { handleAxiosError } from "./axios";
 import { logger } from "@/lib/utils/logger";
@@ -39,13 +40,18 @@ fmpClient.interceptors.request.use((config) => {
 fmpClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    const errorMsg =
-      error.response?.data?.["Error Message"] ||
-      error.response?.data?.error ||
-      error.message ||
-      "FMP API request failed";
-    logger.error("FMP API Error", { error: errorMsg });
-    return Promise.reject(new Error(errorMsg));
+    const status = error.response?.status;
+    // For 5xx gateway/server errors, pass through without logging here.
+    // The retry layer in executeFmpRequest will handle retries and log on final failure.
+    if (status && status >= 500) {
+      return Promise.reject(error);
+    }
+    logger.error("FMP API Error", {
+      status: error.response?.status,
+      url: error.config?.url,
+      data: error.response?.data,
+    });
+    return Promise.reject(error);
   }
 );
 
@@ -98,7 +104,13 @@ async function executeFmpRequest<T>(
         throw error;
       }
       if (axios.isAxiosError(error)) {
-        if (error.response?.status === 429 || error.response?.status === 402) {
+        const status = error.response?.status;
+        // Treat gateway/server errors as transient — retryable via ProviderUnavailableError
+        if (status && (status === 502 || status === 503 || status === 504 || status >= 500)) {
+          logger.warn("FMP transient server error — will retry", { status, url });
+          throw new ProviderUnavailableError(`FMP gateway error ${status} at ${url}`);
+        }
+        if (status === 429 || status === 402) {
           throw new FmpQuotaError("FMP API subscription plan does not support this ticker. Please upgrade or use a major US stock.");
         }
         const responseData = error.response?.data;
@@ -442,13 +454,14 @@ export interface FmpRawData {
  */
 export async function fetchFmpData(ticker: string): Promise<FmpRawData | null> {
   try {
-    const [profileResData, incomeResData, balanceResData, histResData, rsiResData, ratiosResData] =
+    const [profileResData, incomeResData, balanceResData, histResData, ratiosResData] =
       await Promise.all([
         executeFmpRequest<FmpProfile[]>("/profile", { symbol: ticker }),
         executeFmpRequest<FmpIncomeStatement[]>("/income-statement", { symbol: ticker, limit: 1 }),
         executeFmpRequest<FmpBalanceSheet[]>("/balance-sheet-statement", { symbol: ticker, limit: 1 }),
-        executeFmpRequest<FmpHistoricalPrice[]>("/historical-price-eod/full", { symbol: ticker }),
-        executeFmpRequest<FmpTechnicalRsi[]>("/technical-indicators/rsi", { symbol: ticker, periodLength: 14, timeframe: "1day", limit: 1 }),
+        // 500 bars ≈ 2 years of daily data: enough for MA-200, MA-50, RSI-14, and chart display.
+        // Pass limit server-side so FMP sends less data over the wire.
+        executeFmpRequest<FmpHistoricalPrice[]>("/historical-price-eod/full", { symbol: ticker, limit: 500 }),
         executeFmpRequest<FmpRatio[]>("/ratios", { symbol: ticker, limit: 1 }),
       ]);
 
@@ -474,16 +487,31 @@ export async function fetchFmpData(ticker: string): Promise<FmpRawData | null> {
     const balanceSheet: FmpBalanceSheet | Record<string, never> =
       balanceResData && balanceResData.length > 0 ? balanceResData[0] : {};
 
-    // Map historical prices: map 'close' to 'price'
+    // Map historical prices (FMP returns newest-first)
     const historicalPrices: FmpHistoricalPrice[] = (histResData || [])
-      .slice(0, 1250)
+      .slice(0, 500)
       .map((p: FmpHistoricalPrice) => ({
         ...p,
         price: p.close,
       }));
 
+    // Compute RSI locally — no paid endpoint needed.
+    // FMP returns prices newest-first; reverse to chronological order for the calculation.
+    const chronologicalPrices = [...historicalPrices].reverse().map((p) => p.price);
+    const rsiValue = calculateRSI(chronologicalPrices);
+    const latestBar = historicalPrices[0]; // newest bar (index 0 after FMP's descending order)
     const technicals: FmpTechnicalRsi | Record<string, never> =
-      rsiResData && rsiResData.length > 0 ? rsiResData[0] : {};
+      latestBar != null
+        ? {
+            date: latestBar.date,
+            open: latestBar.open,
+            high: latestBar.high,
+            low: latestBar.low,
+            close: latestBar.close,
+            volume: latestBar.volume,
+            rsi: rsiValue,
+          }
+        : {};
 
     return {
       profile,

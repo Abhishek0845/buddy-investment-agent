@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required"),
-  GOOGLE_MODEL: z.string().min(1, "GOOGLE_MODEL is required"),
+  OPENROUTER_API_KEY: z.string().min(1, "OPENROUTER_API_KEY is required"),
+  OPENROUTER_MODEL: z.string().min(1, "OPENROUTER_MODEL is required"),
   FMP_API_KEY: z.string().min(1, "FMP_API_KEY is required"),
   FINNHUB_API_KEY: z.string().min(1, "FINNHUB_API_KEY is required"),
   NODE_ENV: z
@@ -22,8 +22,8 @@ export function getEnv(): EnvConfig {
   const isServer = typeof window === "undefined";
 
   const rawEnv = {
-    GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
-    GOOGLE_MODEL: process.env.GOOGLE_MODEL,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL,
     FMP_API_KEY: process.env.FMP_API_KEY,
     FINNHUB_API_KEY: process.env.FINNHUB_API_KEY,
     NODE_ENV: process.env.NODE_ENV,
@@ -32,8 +32,8 @@ export function getEnv(): EnvConfig {
   if (!isServer) {
     // Client-side environment - secrets are empty
     return {
-      GOOGLE_API_KEY: "",
-      GOOGLE_MODEL: "",
+      OPENROUTER_API_KEY: "",
+      OPENROUTER_MODEL: "",
       FMP_API_KEY: "",
       FINNHUB_API_KEY: "",
       NODE_ENV:

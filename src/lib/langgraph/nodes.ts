@@ -477,6 +477,22 @@ export async function mapReduceFetchNode(
       ) as ThesisResponse;
       logger.info(`[PIPELINE] Step 5d: Gemini synthesis complete for ${report.ticker}`, { requestId });
     } catch (e) {
+      // ── Diagnostic: full synthesis error detail ───────────────────────────
+      // This shows what error surface AFTER invokeLlmWithRetry has run (and
+      // possibly retried). By this point the original error may already have
+      // been wrapped into a ProviderUnavailableError — see the
+      // "[LLM Retry] Original error BEFORE wrapping" log for the raw stack.
+      const errObj = e as any;
+      logger.error(`[PIPELINE] Synthesis error detail for ${report.ticker}`, {
+        requestId,
+        errorClass: e instanceof Error ? e.constructor.name : typeof e,
+        errorMessage: e instanceof Error ? e.message : String(e),
+        isSyntaxError: e instanceof SyntaxError,
+        isZodError: errObj?.constructor?.name === "ZodError" || !!errObj?._errors,
+        isProviderUnavailable: errObj?.constructor?.name === "ProviderUnavailableError",
+        looksLikeFenceError: e instanceof Error && e.message?.includes("`"),
+        stack: e instanceof Error ? e.stack : undefined,
+      });
       logger.warn(`[PIPELINE] Synthesis failed for ${report.ticker} — using deterministic fallback`, {
         requestId,
         error: e instanceof Error ? e.message : String(e),
@@ -779,144 +795,93 @@ export async function qaNode(
   state: typeof AgentState.State,
   config?: NodeConfig
 ): Promise<Partial<typeof AgentState.State>> {
-  const startTime = Date.now();
   const requestId = config?.configurable?.requestId || "N/A";
-  logger.info("[PIPELINE] Step 6: qaNode started", {
+  logger.info("[QA Node] QA node entered", {
     requestId,
-    intent: state.intent,
     userInput: state.userInput,
-    hasDashboard: !!state.dashboardData,
-    dashboardCompanies: state.dashboardData?.companies?.map(c => c.ticker) || [],
-    hasActiveContext: !!state.activeResearchContext,
+    activeTickers: state.tickers,
+    activeResearchContextExists: !!state.activeResearchContext,
   });
 
-  const sendEvent = config?.configurable?.sendEvent;
-  
-  // Short-circuit: Research intent completed, just send a summary chat message
-  if ((state.intent === "SINGLE" || state.intent === "MULTI") && !isQuestionQuery(state.userInput)) {
-    const dashboardData = state.dashboardData;
-    let finalChatText = "";
-
-    if (dashboardData && dashboardData.companies && dashboardData.companies.length > 0) {
-      if (dashboardData.companies.length === 1) {
-        const company = dashboardData.companies[0];
-        const score = typeof company.overallScore === "number" ? company.overallScore.toFixed(1) : "N/A";
-        finalChatText = `### 📈 Analysis Complete for **${company.companyName || company.ticker} (${company.ticker})**\n\n` +
-          `- **Overall Score:** **${score}/10** (Tier: **${company.tier || "N/A"}**)\n` +
-          `- **Recommendation Decision:** **${company.recommendationDecision || "Hold / Wait"}**\n` +
-          `- **Valuation Status:** **${company.valuationStatus || "N/A"}**\n` +
-          `- **Bottom Line:** ${company.investmentMemo?.bottomLine || company.confidenceRationale || "See dashboard for details."}\n\n` +
-          `I have generated the complete report for you. Please check the dashboard tabs for detailed sections.`;
-      } else {
-        finalChatText = `### 📊 Comparison Analysis Complete\n\n` +
-          `I have completed the investment analysis for the requested companies: **${dashboardData.companies.map(c => c.ticker).join(", ")}**.\n\n` +
-          `🏆 **Highest Score:** **${dashboardData.winner}**\n\n` +
-          `You can find the detailed comparison table and individual breakdowns in the **Comparison** tab.`;
-      }
-    } else {
-      // Dashboard data is missing — the fetch likely failed silently
-      const tickerList = state.tickers?.join(", ") || "the requested company";
-      finalChatText = `⚠️ **Analysis Incomplete**\n\nI was unable to generate a complete report for **${tickerList}**. The financial data fetch may have failed or returned no results.\n\nThis can happen when:\n- The company is listed on an unsupported exchange (e.g. NSE/BSE for Indian stocks)\n- The market data provider returned no profile\n- API rate limits were hit\n\nPlease try a US-listed stock (e.g. AAPL, TSLA, NVDA, MSFT) or an Indian ADR listed on NYSE/NASDAQ like **INFY**, **WIT**, or **HDB**.`;
-    }
-
-    logger.info("[PIPELINE] Step 6: qaNode sending research summary chat message", {
-      requestId,
-      chatTextLength: finalChatText.length,
-      companies: dashboardData?.companies?.map(c => c.ticker) || [],
-    });
-
-    if (sendEvent) {
-      sendEvent("chat", { token: finalChatText });
-      sendEvent("context", state.activeResearchContext);
-    }
-
-    const duration = Date.now() - startTime;
-    logger.info("[PIPELINE] Step 6: qaNode finished (research summary branch)", {
-      requestId,
-      durationMs: duration,
-      chatSent: true,
-    });
-    return { error: `CHAT_RESPONSE::${finalChatText}`, activeResearchContext: state.activeResearchContext };
-  }
-
-  // QA path: use Gemini to answer based on context
-  const context = buildOptimizedContext(state.activeResearchContext, state.dashboardData);
+  // 1. Build the context strictly from the active tab
+  const context = JSON.stringify(state.activeResearchContext, null, 2);
   const prompt = QA_PROMPT.replace("{activeResearchContext}", context);
 
-  let finalChatText = "";
-  try {
-    const wrappedInput = `<user_input>\n${state.userInput}\n</user_input>`;
-    const chatHistory = state.activeResearchContext?.conversationMetadata?.chatHistory || [];
+  const charCount = context.length;
+  const estimatedTokens = Math.ceil(charCount / 4);
+  const companyCount = state.activeResearchContext?.reports 
+    ? Object.keys(state.activeResearchContext.reports).length 
+    : 0;
+  const serializedSize = Buffer.byteLength(context, "utf8");
 
-    const messages = [
-      { role: "system", content: prompt },
-      ...chatHistory.map(m => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.content
-      })),
-      { role: "user", content: wrappedInput }
-    ];
-
-    logger.info("[PIPELINE] Step 6: qaNode calling Gemini for answer", {
-      requestId,
-      historyLength: chatHistory.length,
-      contextLength: context.length,
-    });
-
-    // Stream the response so the user sees text immediately rather than waiting 3-5 seconds
-    const stream = await llm.stream(messages);
-    for await (const chunk of stream) {
-      const text = chunk.content as string;
-      if (text) {
-        finalChatText += text;
-        if (sendEvent) {
-          sendEvent("chat", { token: text });
-        }
-      }
-    }
-
-    logger.info("[PIPELINE] Step 6: qaNode Gemini answer received", {
-      requestId,
-      responseLength: finalChatText.length,
-    });
-  } catch (err) {
-    logger.error("[PIPELINE] qaNode LLM call failed — using deterministic fallback", {
-      requestId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    let fallbackText = "⚠️ Generative AI API is currently rate-limited. However, based on the loaded research reports:\n\n";
-    if (state.activeResearchContext?.reports) {
-      for (const [ticker, report] of Object.entries(state.activeResearchContext.reports)) {
-        fallbackText += `* **${ticker}**: Overall Score of **${report.overallScore}/10** (Tier: ${report.tier}).\n`;
-        fallbackText += `  - Fundamentals: ${report.categories.fundamentals.score}/10\n`;
-        fallbackText += `  - Technicals: ${report.categories.technicals.score}/10\n`;
-        fallbackText += `  - Sentiment: ${report.categories.sentiment.score}/10\n`;
-        fallbackText += `  - Risk: ${report.categories.risk.score}/10\n\n`;
-      }
-    } else {
-      fallbackText += "No active research reports are currently loaded in context.";
-    }
-    
-    finalChatText = fallbackText;
-    if (sendEvent) {
-      sendEvent("chat", { token: finalChatText });
-    }
-  }
-
-  // Preserve positions context and trigger client-side update
-  if (sendEvent) {
-    sendEvent("context", state.activeResearchContext);
-  }
-
-  const duration = Date.now() - startTime;
-  logger.info("[PIPELINE] Step 6: qaNode finished", {
+  logger.info("[QA Node] Context statistics", {
     requestId,
-    durationMs: duration,
-    chatSent: !!finalChatText,
-    chatTextLength: finalChatText.length,
+    charCount,
+    estimatedTokens,
+    companyCount,
+    serializedSize,
   });
 
-  return { error: `CHAT_RESPONSE::${finalChatText}`, activeResearchContext: state.activeResearchContext };
+  const invokeStartTime = Date.now();
+  try {
+    logger.info("[QA Node] Immediately before llm.invoke()", {
+      requestId,
+    });
+
+    // 2. Invoke LLM (blocking call, no streaming)
+    const response = await llm.invoke([
+      { role: "system", content: prompt },
+      { role: "user", content: state.userInput }
+    ]);
+
+    const latency = Date.now() - invokeStartTime;
+    logger.info("[QA Node] Immediately after llm.invoke()", {
+      requestId,
+      latencyMs: latency,
+    });
+
+    // Inspect the OpenRouter response details before parsing response.content
+    logger.info("[QA Node] Raw AIMessage response from ChatOpenAI", {
+      requestId,
+      additional_kwargs: response.additional_kwargs,
+      response_metadata: response.response_metadata,
+      tool_calls: response.tool_calls,
+      invalid_tool_calls: (response as any).invalid_tool_calls,
+      usage_metadata: (response as any).usage_metadata,
+      raw_json: JSON.parse(JSON.stringify(response)),
+    });
+
+    const contentStr = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+    logger.info("[QA Node] Response metadata", {
+      requestId,
+      responseType: typeof response.content,
+      contentLength: contentStr.length,
+      first200: contentStr.slice(0, 200),
+    });
+
+    logger.info("[QA Node] Immediately before returning CHAT_RESPONSE", {
+      requestId,
+    });
+
+    // 3. Return the complete text using the CHAT_RESPONSE convention
+    // The API route handler is looking for this exact prefix
+    return { error: `CHAT_RESPONSE::${response.content}` }; 
+  } catch (error) {
+    const duration = Date.now() - invokeStartTime;
+    const err = error as any;
+    logger.error("[QA Node] Error occurred during LLM invocation", {
+      requestId,
+      errorName: err.name,
+      errorMessage: err.message,
+      stack: err.stack,
+      httpStatus: err.status ?? err.response?.status ?? err.statusCode ?? "N/A",
+      responseBody: err.response?.data ?? err.body ?? err.error ?? "N/A",
+      durationBeforeFailureMs: duration,
+    });
+
+    console.error("[QA Node] LLM invocation failed:", error);
+    return { error: "I'm having trouble processing that right now. Please try again." };
+  }
 }
 
 export async function rejectNode(
